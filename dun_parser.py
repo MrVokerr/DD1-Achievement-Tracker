@@ -301,3 +301,47 @@ def parse_equipment(r: BinaryReader) -> dict:
     e['feature_array'] = r.read_arr_i32(MAX_FEATURE_SLOTS)
 
     return e
+
+
+def get_savefile_beaten_levels(dun_path: str) -> dict[str, int]:
+    """Parse DunDefHeroes.dun and return a dict of beaten level tags -> difficulty mask."""
+    try:
+        if not os.path.exists(dun_path):
+            return {}
+        data = decompress_dun(dun_path)
+        r = BinaryReader(data)
+        r.read_i32()  # version
+        r.read_i32()  # size
+        parse_options_info(r)
+        hero_count = r.read_i32()
+        for _ in range(hero_count):
+            parse_hero_info(r)
+            eq_count = r.read_i32()
+            for _ in range(eq_count):
+                parse_equipment(r)
+        
+        # Read achievement bytes
+        r.read(MAX_ACHIEVEMENTS)
+        
+        # Parse CoreUnlockInfo [i8; 40]
+        r.read(40)
+        
+        # Parse CrystalCoreOptions
+        r.read_i32()  # core_index
+        r.read_linear_color()
+        r.read_linear_color()
+        r.read_linear_color()
+        
+        # Parse beaten_levels: Vec<LevelProgressInfo>
+        beaten_count = r.read_i32()
+        beaten_map = {}
+        for _ in range(beaten_count):
+            tag = r.read_string()
+            diff_mask = r.read_i32()
+            if tag:
+                beaten_map[tag.upper()] = diff_mask
+        return beaten_map
+    except Exception as e:
+        print(f"[Error parsing beaten levels]: {e}")
+        return {}
+

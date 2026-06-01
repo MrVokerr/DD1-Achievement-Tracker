@@ -26,6 +26,7 @@ from dun_parser import (
     decompress_dun, BinaryReader,
     parse_options_info, parse_hero_info, parse_equipment,
     MAX_ACHIEVEMENTS, DUN_FILE, DEFAULT_INI,
+    get_savefile_beaten_levels,
 )
 
 from PySide6.QtWidgets import (
@@ -502,13 +503,71 @@ QCheckBox::indicator:checked  { background: #4ec94e; border-color: #4ec94e; }
 QCheckBox::indicator:hover    { border-color: #888; }
 """
 
+# ── Auto-unlock evaluation helpers ───────────────────────────────────────────
+
+def check_ruthless_defender(beaten_levels: dict[str, int]) -> bool:
+    """Check if all 13 original campaign maps and challenges are completed on Ruthless Hardcore."""
+    if not beaten_levels:
+        return False
+    campaign_tags = {
+        "CAMPDW", "CAMPFF", "CAMPAL", "CAMPMQ", "CAMPSQ", "CAMPCA",
+        "CAMPHC", "CAMPTR", "CAMPRG", "CAMPRP", "CAMPES", "CAMPTS", "CAMPGC"
+    }
+    challenge_tags = {
+        "SPECDW", "SPECFF", "WARPP1", "SPECHW", "SPECMQ", "SPECOA",
+        "SPECAL", "SPECSQ", "SPECCA", "SPECHC", "SPECTR", "SPECRG", "SPECTH"
+    }
+    ruthless_hc_bit = 1 << 11  # Bit 11 corresponds to Ruthless Hardcore
+    
+    campaign_ok = all((beaten_levels.get(tag, 0) & ruthless_hc_bit) != 0 for tag in campaign_tags)
+    
+    challenges_beaten = sum(
+        1 for tag in challenge_tags
+        if (beaten_levels.get(tag, 0) & ruthless_hc_bit) != 0
+    )
+    challenges_ok = challenges_beaten >= 12
+    
+    return campaign_ok and challenges_ok
+
+
+def check_chromatic_defender(beaten_levels: dict[str, int]) -> bool:
+    """Check if all DDT maps from Spooktacular Bay to Scorched Arabia and Warping Core II to Boss Rush II are completed on Nightmare Hardcore."""
+    if not beaten_levels:
+        return False
+    if not check_ruthless_defender(beaten_levels):
+        return False
+        
+    nm_hc_bit = 1 << 10
+    ruthless_hc_bit = 1 << 11
+    
+    required_tags = {
+        "SPECCA", # Spooktacular Bay
+        "SPECHW", # Halloween Spooktacular
+        "LHOLOC", # Lifestream Hollow
+        "VDAY03", # Lover's Paradise
+        "RETMIS", # Returnia Mistymire
+        "RETMOR", # Returnia Moraggo
+        "RETAQU", # Returnia Aquanos
+        "RETSKY", # Returnia Sky City
+        "RETCRD", # Returnia Crystalline Dimension
+        "CDTARA", # Scorched Arabia
+        "CDTTWC", # Warping Core II
+        "SPECGC", # Boss Rush II
+    }
+    
+    return all(
+        ((beaten_levels.get(tag, 0) & nm_hc_bit) != 0 or (beaten_levels.get(tag, 0) & ruthless_hc_bit) != 0)
+        for tag in required_tags
+    )
+
+
 # ── Achievement row widget ────────────────────────────────────────────────────
 
 class AchRow(QFrame):
     def __init__(self, name: str, desc: str, category: str, unlocked: bool,
                  is_manual: bool = False, manual_checked: bool = False,
                  dot_color: str = "#3c3c3c", wiki_url: str = "",
-                 on_manual_change=None, parent=None):
+                 on_manual_change=None, parent=None, auto_unlocked: bool = False):
         super().__init__(parent)
         self.name = name
         self.desc = desc
@@ -516,13 +575,14 @@ class AchRow(QFrame):
         self.unlocked = unlocked
         self.is_manual = is_manual
         self.manual_checked = manual_checked
+        self.auto_unlocked = auto_unlocked
         self._dot_color = dot_color
         self._wiki_url = wiki_url
         self._on_change = on_manual_change
         self._build()
 
     def _build(self):
-        is_done = self.unlocked or (self.is_manual and self.manual_checked)
+        is_done = self.unlocked or (self.is_manual and (self.manual_checked or self.auto_unlocked))
         self.setObjectName("card_done" if is_done else "card")
         self.setFixedHeight(62)
         if self._wiki_url:
@@ -572,13 +632,22 @@ class AchRow(QFrame):
         layout.addLayout(text_col, stretch=1)
 
         if self.is_manual:
-            cb = QCheckBox()
-            cb.setChecked(self.manual_checked)
-            cb.setToolTip("Mark as completed")
-            cb.toggled.connect(
-                lambda checked, n=self.name: self._on_change and self._on_change(n, checked)
-            )
-            layout.addWidget(cb)
+            if self.auto_unlocked:
+                badge = QLabel("✓ Save Verified")
+                badge.setStyleSheet(
+                    "color: #4ec94e; font-size: 11px; font-weight: bold; "
+                    "background: transparent; border: none;"
+                )
+                badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+                layout.addWidget(badge)
+            else:
+                cb = QCheckBox()
+                cb.setChecked(self.manual_checked)
+                cb.setToolTip("Mark as completed")
+                cb.toggled.connect(
+                    lambda checked, n=self.name: self._on_change and self._on_change(n, checked)
+                )
+                layout.addWidget(cb)
         else:
             badge_text  = "✓ Unlocked" if self.unlocked else "Locked"
             badge_color = "#4ec94e"    if self.unlocked else "#4a4a4a"
@@ -679,6 +748,7 @@ class AchievementTracker(QMainWindow):
         self._manual_state: dict    = _load_manual(_MANUAL_JSON)
         self._filter_mode  = "all"
         self._rows: list[AchRow]    = []
+        self._beaten_levels: dict[str, int] = {}
 
         root = QWidget()
         root.setObjectName("root")
@@ -769,15 +839,17 @@ class AchievementTracker(QMainWindow):
         print(f"dun_parser module path: {getattr(dun_parser, '__file__', 'unknown')}", flush=True)
         try:
             self._unlocked = get_unlocked_steam_ids(self._dun_path, self._ini_path)
+            self._beaten_levels = get_savefile_beaten_levels(self._dun_path)
             self._status_lbl.setText(
-                f"Loaded — {len(self._unlocked)} Steam achievements detected"
+                f"Loaded — {len(self._unlocked)} Steam achievements / {len(self._beaten_levels)} level completions verified"
             )
-            print(f"Successfully loaded and parsed achievements! Unlocked: {len(self._unlocked)}", flush=True)
+            print(f"Successfully loaded and parsed achievements! Unlocked: {len(self._unlocked)}, Level completions: {len(self._beaten_levels)}", flush=True)
         except Exception as e:
             import traceback
             print(f"\n[ERROR] Failed to load achievements!", file=sys.stderr, flush=True)
             traceback.print_exc()
             self._unlocked = set()
+            self._beaten_levels = {}
             self._status_lbl.setObjectName("status_err")
             self._status_lbl.setText(f"Error: {e}")
         self._status_lbl.setStyle(self._status_lbl.style())
@@ -807,7 +879,12 @@ class AchievementTracker(QMainWindow):
     def _update_meta_cards(self) -> None:
         for card, (_title, self_sid, reqs, _color) in zip(self._meta_cards, META_DEFS):
             if not reqs:
-                is_done = self._manual_state.get(_title, False)
+                auto_unlocked = False
+                if _title == "Ruthless Defender":
+                    auto_unlocked = check_ruthless_defender(self._beaten_levels)
+                elif _title == "Chromatic Defender":
+                    auto_unlocked = check_chromatic_defender(self._beaten_levels)
+                is_done = self._manual_state.get(_title, False) or auto_unlocked
                 card.set_progress(0, is_done)
             else:
                 done = sum(
@@ -815,7 +892,11 @@ class AchievementTracker(QMainWindow):
                     if (
                         (_NAME_TO_STEAMID.get(name) in self._unlocked)
                         if _NAME_TO_STEAMID.get(name)
-                        else self._manual_state.get(name, False)
+                        else (
+                            self._manual_state.get(name, False)
+                            or (name == "Ruthless Defender" and check_ruthless_defender(self._beaten_levels))
+                            or (name == "Chromatic Defender" and check_chromatic_defender(self._beaten_levels))
+                        )
                     )
                 )
                 manual_override = self._manual_state.get(_title, False)
@@ -839,7 +920,15 @@ class AchievementTracker(QMainWindow):
             is_manual      = (steam_id is None)
             unlocked       = (steam_id in self._unlocked) if steam_id else False
             manual_checked = self._manual_state.get(name, False) if is_manual else False
-            is_done        = unlocked or manual_checked
+            
+            auto_unlocked = False
+            if is_manual:
+                if name == "Ruthless Defender":
+                    auto_unlocked = check_ruthless_defender(self._beaten_levels)
+                elif name == "Chromatic Defender":
+                    auto_unlocked = check_chromatic_defender(self._beaten_levels)
+            
+            is_done        = unlocked or manual_checked or auto_unlocked
 
             if self._filter_mode == "unlocked" and not is_done:
                 continue
@@ -865,6 +954,7 @@ class AchievementTracker(QMainWindow):
                 dot_color=_ACH_META_COLOR.get(name, "#3c3c3c"),
                 wiki_url=_wiki_url(name),
                 on_manual_change=self._on_manual_change,
+                auto_unlocked=auto_unlocked
             )
             self._list_layout.insertWidget(self._list_layout.count() - 1, row)
             self._rows.append(row)
@@ -872,7 +962,11 @@ class AchievementTracker(QMainWindow):
         steam_total  = sum(1 for *_, sid in ACHIEVEMENTS if sid)
         manual_total = sum(1 for r in ACHIEVEMENTS if not r[3])
         manual_done  = sum(
-            1 for r in ACHIEVEMENTS if not r[3] and self._manual_state.get(r[0], False)
+            1 for r in ACHIEVEMENTS if not r[3] and (
+                self._manual_state.get(r[0], False)
+                or (r[0] == "Ruthless Defender" and check_ruthless_defender(self._beaten_levels))
+                or (r[0] == "Chromatic Defender" and check_chromatic_defender(self._beaten_levels))
+            )
         )
         self._counter_lbl.setText(
             f"{len(self._unlocked)} / {steam_total} Steam  ·  {manual_done} / {manual_total} Manual"
