@@ -762,12 +762,21 @@ class AchievementTracker(QMainWindow):
 
     def _load(self):
         self._status_lbl.setObjectName("status_ok")
+        import dun_parser
+        print("\n--- Diagnostic Info ---", flush=True)
+        print(f"Loading save file: {self._dun_path}", flush=True)
+        print(f"Using INI file: {self._ini_path}", flush=True)
+        print(f"dun_parser module path: {getattr(dun_parser, '__file__', 'unknown')}", flush=True)
         try:
             self._unlocked = get_unlocked_steam_ids(self._dun_path, self._ini_path)
             self._status_lbl.setText(
                 f"Loaded — {len(self._unlocked)} Steam achievements detected"
             )
+            print(f"Successfully loaded and parsed achievements! Unlocked: {len(self._unlocked)}", flush=True)
         except Exception as e:
+            import traceback
+            print(f"\n[ERROR] Failed to load achievements!", file=sys.stderr, flush=True)
+            traceback.print_exc()
             self._unlocked = set()
             self._status_lbl.setObjectName("status_err")
             self._status_lbl.setText(f"Error: {e}")

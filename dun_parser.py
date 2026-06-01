@@ -221,34 +221,83 @@ def parse_hero_info(r: BinaryReader) -> tuple:
 
 
 def parse_equipment(r: BinaryReader) -> dict:
-    """Consume one EquipmentInfo block."""
-    r.read_bool()
-    r.read_arr_i8(MAX_DAMAGEREDUCTIONS)
-    r.read_arr_i8(MAX_DAMAGEREDUCTIONS)
-    r.read_arr_i32(MAX_LEVELUP_STATS)
-    r.read_arr_i32(MAX_LEVELUP_STATS)
-    r.read_i32()
-    r.read_i8(); r.read_i32(); r.read_i8(); r.read_i32()
-    r.read_f32(); r.read_f32()
-    r.read_i32(); r.read_i32(); r.read_f32(); r.read_f32()
-    r.read_i8(); r.read_i32(); r.read_i32()
-    r.read_i8(); r.read_i8(); r.read_i8(); r.read_i8()
-    r.read_i8(); r.read_i8(); r.read_i8(); r.read_i8()
-    r.read_i8(); r.read_i8(); r.read_i8()
-    r.read_i8(); r.read_i8()
-    r.read_i32(); r.read_i32(); r.read_i32(); r.read_i32()
-    r.read_i32(); r.read_i32(); r.read_i32(); r.read_i32()
-    r.read_i8(); r.read_i8(); r.read_i8(); r.read_i8()
-    r.read_i8(); r.read_i8(); r.read_i8(); r.read_i8()
-    r.read_linear_color(); r.read_linear_color()
-    r.read_string(); r.read_string(); r.read_string()
-    r.read_string(); r.read_string()
-    r.read_i32()
-    r.read_bool()
-    r.read_arr_i32(MAX_BUFF_SLOTS)
-    r.read_arr_i32(MAX_BUFF_SLOTS)
-    r.read_linear_color()
-    r.read_string()
-    r.read_i8(); r.read_i8(); r.read_i8()
-    r.read_arr_i32(MAX_FEATURE_SLOTS)
-    return {}
+    """Parse one EquipmentInfo and return a dict of raw values."""
+    e = {}
+    e['is_initialized'] = r.read_bool()
+
+    e['damage_reduction_index']      = r.read_arr_i8(MAX_DAMAGEREDUCTIONS)
+    # damage_reduction_percentage: i8 × 4, wrapping_sub(127) applied later
+    e['damage_reduction_percentage'] = r.read_arr_i8(MAX_DAMAGEREDUCTIONS)
+
+    # stat_modifiers: i32 × 11, wrapping_sub(127) applied later
+    e['stat_modifiers']              = r.read_arr_i32(MAX_LEVELUP_STATS)
+    # spawn_stat_modifiers: i32 × 11 (NOT transformed)
+    e['spawn_stat_modifiers']        = r.read_arr_i32(MAX_LEVELUP_STATS)
+
+    e['weapon_damage_bonus']         = r.read_i32()
+    # i8 fields that need wrapping_sub(127):
+    e['weapon_number_of_projectiles_bonus'] = r.read_i8()
+    e['weapon_speed_of_projectiles_bonus']  = r.read_i32()
+    e['weapon_additional_damage_type_index'] = r.read_i8()
+    e['weapon_additional_damage_amount']     = r.read_i32()
+    e['weapon_draw_scale_multiplier']        = r.read_f32()
+    e['weapon_swing_speed_multiplier']       = r.read_f32()
+    e['level']                               = r.read_i32()
+    e['stored_mana']                         = r.read_i32()
+    e['spawn_quality']                       = r.read_f32()
+    e['spawn_randomizer_multiplier']         = r.read_f32()
+    e['weapon_blocking_bonus']               = r.read_i8()
+    e['weapon_alt_damage_bonus']             = r.read_i32()
+    e['weapon_clip_ammo_bonus']              = r.read_i32()
+    e['weapon_reload_speed_bonus']           = r.read_i8()
+    e['weapon_knockback_bonus']              = r.read_i8()
+    e['weapon_charge_speed_bonus']           = r.read_i8()
+    e['weapon_shots_per_second_bonus']       = r.read_i8()
+
+    e['name_index_base']               = r.read_i8()
+    e['name_index_damage_reduction']   = r.read_i8()
+    e['name_index_quality_descriptor'] = r.read_i8()
+    e['primary_color_set']             = r.read_i8()
+    e['secondary_color_set']           = r.read_i8()
+    e['equipment_id_1']                = r.read_i32()
+    e['equipment_id_2']                = r.read_i32()
+    e['minimum_sell_worth']            = r.read_i32()
+    e['maximum_sell_worth']            = r.read_i32()
+    e['max_equipment_level']           = r.read_i32()
+    e['dropped_location_x']            = r.read_i32()
+    e['dropped_location_y']            = r.read_i32()
+    e['dropped_location_z']            = r.read_i32()
+
+    e['can_be_upgraded']             = r.read_i8()
+    e['allow_renaming_at_max_upgrade'] = r.read_i8()
+    e['cant_be_dropped']             = r.read_i8()
+    e['cant_be_sold']                = r.read_i8()
+    e['auto_lock_in_item_box']       = r.read_i8()
+    e['did_onetime_effect']          = r.read_i8()
+    e['is_locked']                   = r.read_i8()
+    e['manual_lr']                   = r.read_i8()
+
+    e['primary_color_override']   = r.read_linear_color()
+    e['secondary_color_override'] = r.read_linear_color()
+
+    e['user_equipment_name'] = r.read_string()
+    e['user_forger_name']    = r.read_string()
+    e['description']         = r.read_string()
+    e['equipment_template']  = r.read_string()
+    e['equipment_timestamp'] = r.read_string()
+
+    e['folder_id']    = r.read_i32()
+    e['is_secondary'] = r.read_bool()
+
+    e['stat_equipment_ids']   = r.read_arr_i32(MAX_BUFF_SLOTS)
+    e['stat_equipment_tiers'] = r.read_arr_i32(MAX_BUFF_SLOTS)
+
+    e['quality_beam_color_override'] = r.read_linear_color()
+    e['equipment_feature_string']    = r.read_string()
+
+    e['hide_quality_descriptors'] = r.read_i8()
+    e['equipment_feature_byte1']  = r.read_i8()
+    e['equipment_feature_byte2']  = r.read_i8()
+    e['feature_array'] = r.read_arr_i32(MAX_FEATURE_SLOTS)
+
+    return e
