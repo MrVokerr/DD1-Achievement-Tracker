@@ -2,8 +2,6 @@
 
 A desktop GUI tool for tracking all **163 Dungeon Defenders 1 achievements** — including 118 Steam-tracked achievements read directly from your save file, plus 45 non-Steam (CDT/DDT) achievements with manual checkboxes.
 
-![Dark VS Code-style UI with achievement cards, meta progress bars, filter buttons, and search](./.github/preview.png)
-
 ---
 
 ## Features
