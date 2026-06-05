@@ -1,6 +1,41 @@
 # DD1 Achievement Tracker
 
-A desktop GUI for tracking all **163 Dungeon Defenders 1 achievements** — **118 Steam achievements** read from your save file, plus **45 non-Steam (CDT/DDT) entries** that are not stored in the `.dun` bitmap.
+A desktop GUI and **browser web app** for tracking all **163 Dungeon Defenders 1 achievements** — **118 Steam achievements** read from your save file, plus **45 non-Steam (CDT/DDT) entries** that are not stored in the `.dun` bitmap.
+
+---
+
+## Desktop vs Web
+
+| | **Desktop** (`achievement_tracker.py`) | **Web** (`web/`) |
+|---|---|---|
+| Run | Python + PySide6 | Any modern browser |
+| Save file | Browse to `.dun`; path remembered in `_ach_manual.json` | Drop or Browse — **parsed locally in your browser** |
+| Upload | Never leaves your PC | **Never uploaded** — no server-side parsing |
+| Steam index | Bundled JSON or auto INI from install path | Bundled `steam_achievement_index.json` |
+| Account reset | Follows **save file**, not Steam profile | Same — save is source of truth |
+
+### Web (Cloudflare Pages)
+
+Static site in `web/` — deploy to **Cloudflare Pages** (free tier friendly: only static assets, zero Worker CPU per user).
+
+**Build settings (dashboard):**
+
+| Setting | Value |
+|---|---|
+| Build command | `python scripts/export_web_data.py && cd web && npm ci && npm run build` |
+| Build output directory | `web/dist` |
+| Root directory | repository root |
+
+**Privacy:** Your `.dun` is read with `FileReader` in the tab only; it is **not** sent to Cloudflare or any backend.
+
+**Live URL:** Set your custom domain in Cloudflare Pages after connecting this repo (e.g. `achievements.yourdomain.com`).
+
+Local dev:
+
+```bash
+python scripts/export_web_data.py
+cd web && npm install && npm run dev
+```
 
 ---
 
@@ -202,9 +237,25 @@ The app creates `_ach_manual.json` beside the script for **UI settings only** (l
 | File | Purpose |
 |---|---|
 | `achievement_tracker.py` | Main GUI application — run with `python achievement_tracker.py` |
+| `achievement_data.py` | Shared achievement constants (desktop + web export; no Qt) |
+| `save_checks.py` | Ruthless/Chromatic + unlock helpers without Qt (parity tests) |
 | `dun_parser.py` | Save-file decompressor, achievement bytes, beaten-level parser |
 | `steam_achievement_index.json` | Bundled Steam achievement ID order (maps `.dun` byte indices) |
 | `requirements.txt` | Python dependencies (`PySide6`) |
+| `scripts/export_web_data.py` | Export JSON into `web/src/data/` before web build |
+| `scripts/parity_test.py` | Compare desktop vs web parser on the same `.dun` |
+| `web/` | Vite + TypeScript static site (client-side parsing via `pako`) |
 | `dump_ach_bytes.py` | Debug helper: `python dump_ach_bytes.py path/to/DunDefHeroes.dun` |
 | `extract_steam_index.py` | Maintainer tool to refresh `steam_achievement_index.json` from a game INI |
 | `_ach_manual.json` | Auto-created local UI settings (created on first run; keep private) |
+
+### Parity testing
+
+```bash
+python scripts/export_web_data.py
+cd web && npm install
+python scripts/parity_test.py path/to/DunDefHeroes.dun
+python scripts/parity_fixture_test.py
+```
+
+Or run unit tests only: `cd web && npm test`
