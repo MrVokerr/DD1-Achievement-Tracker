@@ -20,15 +20,6 @@ MAX_FEATURE_SLOTS   = 10
 
 VERBOSE = "--verbose" in sys.argv or "-v" in sys.argv
 
-# ── Auto-detect paths (shared with Gear Optimizer / Profit Bot) ───────────────
-_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-if _REPO_ROOT not in sys.path:
-    sys.path.insert(0, _REPO_ROOT)
-from dd_paths import find_dun_file, find_ini_file  # noqa: E402
-
-DUN_FILE = find_dun_file()
-DEFAULT_INI = find_ini_file()
-
 # ── BinaryReader ──────────────────────────────────────────────────────────────
 
 class BinaryReader:
@@ -110,7 +101,8 @@ def decompress_dun(path: str) -> bytes:
     with open(path, 'rb') as fh:
         raw = fh.read()
 
-    print(f"Raw file size: {len(raw):,} bytes", flush=True)
+    if VERBOSE:
+        print(f"Raw file size: {len(raw):,} bytes", flush=True)
 
     blocks = []
     for magic in _ZLIB_MAGIC:
@@ -136,7 +128,12 @@ def decompress_dun(path: str) -> bytes:
             ordered.append(data)
 
     result = b''.join(ordered)
-    print(f"Found {len(ordered)} zlib block(s). Total decompressed size: {len(result):,} bytes", flush=True)
+    if VERBOSE:
+        print(
+            f"Found {len(ordered)} zlib block(s). "
+            f"Total decompressed size: {len(result):,} bytes",
+            flush=True,
+        )
     return result
 
 # ── Structure parsers (skip-only — advance the cursor to reach ach bytes) ─────

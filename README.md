@@ -7,7 +7,7 @@ A desktop GUI for tracking all **163 Dungeon Defenders 1 achievements** — **11
 ## Features
 
 - **Browse any `.dun` file** — point at your save (or someone else's) with **Browse…**; path is remembered locally
-- **Steam achievements** — unlocked flags parsed from `DunDefHeroes.dun` + `UDKEngineSteamworks.ini`
+- **Steam achievements** — unlocked flags parsed from your `.dun` save (byte index mapped via bundled `steam_achievement_index.json`, or your game’s `UDKEngineSteamworks.ini` when on a standard install path)
 - **Save-verified meta tracking** — **Ruthless Defender** and **Chromatic Defender** progress computed from beaten-level data in your save (no manual checkboxes)
 - **5 clickable meta cards** at the top (Legendary → Ultimate → Eternal → Ruthless → Chromatic) with colored progress bars — **click a card to jump** to that section in **Meta Path** sort (scrolls so the section header is pinned to the top of the list)
 - **Expandable map lists** for Ruthless and Chromatic sections — large expand buttons show every required map as done/missing (respects the active filter)
@@ -23,41 +23,38 @@ A desktop GUI for tracking all **163 Dungeon Defenders 1 achievements** — **11
 ## Requirements
 
 - Python 3.10 or newer
-- PySide6
+- Dependencies in `requirements.txt` (PySide6)
 
 ```
-pip install PySide6
+pip install -r requirements.txt
 ```
+
+This repo is **self-contained** — clone it, install PySide6, point at a `.dun` file, and run. No Steam library scan, no parent monorepo, no game install required (only your save file).
 
 ---
 
-## Usage
+## Quick start
 
-From a terminal in this folder:
-
-```
+```bash
+git clone https://github.com/MrVokerr/DD1-Achievement-Tracker.git
+cd DD1-Achievement-Tracker
+pip install -r requirements.txt
 python achievement_tracker.py
 ```
 
-On Windows you can also create a local `achievement_tracker.pyw` launcher (not included in the repo) that calls `achievement_tracker.main()` with `pythonw` for a console-free window.
-
-On first launch, click **Browse…** and select your save file:
-
-```
-<SteamLibrary>\steamapps\common\Dungeon Defenders\Binaries\Win32\DunDefHeroes.dun
-```
-
-(or `Win64\DunDefHeroes.dun` on 64-bit installs)
-
-The Steam achievement index is read from:
-
-```
-<SteamLibrary>\steamapps\common\Dungeon Defenders\UDKGame\Config\UDKEngineSteamworks.ini
-```
-
-Both paths are included with every Steam installation of the game. The app can also auto-detect installs on common Steam library drives when no saved path exists.
+On first launch, click **Browse…** and select `DunDefHeroes.dun` from any location (yours, a friend’s backup, a copied save, etc.). The path is saved locally in `_ach_manual.json` for next time.
 
 Use **Reload** after playing to refresh unlocks and map completion data.
+
+### How data is loaded
+
+| Data | Source |
+|---|---|
+| Steam achievement unlocks | 500-byte block inside your `.dun` file |
+| Achievement byte → Steam ID order | `steam_achievement_index.json` (bundled), or `UDKEngineSteamworks.ini` auto-derived when your `.dun` lives under `…/Binaries/Win32` or `Win64` |
+| Ruthless / Chromatic map progress | Beaten-level flags inside your `.dun` file |
+
+You never need to browse for the INI manually on a normal install — if the save is under `Dungeon Defenders/Binaries/…`, the tracker finds the matching INI. Otherwise the bundled index is used.
 
 ---
 
@@ -206,5 +203,8 @@ The app creates `_ach_manual.json` beside the script for **UI settings only** (l
 |---|---|
 | `achievement_tracker.py` | Main GUI application — run with `python achievement_tracker.py` |
 | `dun_parser.py` | Save-file decompressor, achievement bytes, beaten-level parser |
-| `dump_ach_bytes.py` | Debug helper for inspecting raw achievement bytes |
+| `steam_achievement_index.json` | Bundled Steam achievement ID order (maps `.dun` byte indices) |
+| `requirements.txt` | Python dependencies (`PySide6`) |
+| `dump_ach_bytes.py` | Debug helper: `python dump_ach_bytes.py path/to/DunDefHeroes.dun` |
+| `extract_steam_index.py` | Maintainer tool to refresh `steam_achievement_index.json` from a game INI |
 | `_ach_manual.json` | Auto-created local UI settings (created on first run; keep private) |

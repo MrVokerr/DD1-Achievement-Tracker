@@ -6,15 +6,14 @@ Reads your DunDefHeroes.dun save file and shows which of the 163
 Dungeon Defenders achievements you have unlocked.
 
 Usage:
-    Double-click achievement_tracker.pyw   (Windows — no console)
-    python achievement_tracker.py          (terminal)
+    python achievement_tracker.py
 
 Requirements:
-    pip install PySide6
+    pip install -r requirements.txt
 
-Your .dun file is not auto-detected — click Browse on first launch to
-select DunDefHeroes.dun. The path is remembered in _ach_manual.json for
-later runs.
+On first launch, click Browse and select your DunDefHeroes.dun save file.
+The path is remembered in _ach_manual.json for later runs. All achievement
+and map data is read from that .dun file; no Steam install scan is required.
 """
 import sys, os, re, struct, json
 from urllib.parse import quote as _url_quote
@@ -32,6 +31,7 @@ from dun_parser import (
 
 _MANUAL_JSON = os.path.join(_SCRIPT_DIR, "_ach_manual.json")
 _INI_FILENAME = "UDKEngineSteamworks.ini"
+_BUNDLED_ACH_INDEX_JSON = os.path.join(_SCRIPT_DIR, "steam_achievement_index.json")
 
 try:
     from PySide6.QtWidgets import (
@@ -702,11 +702,6 @@ def _resolve_save_paths(
         ini = saved_ini if saved_ini and os.path.isfile(saved_ini) else _ini_path_for_dun(saved_dun)
         return saved_dun, ini
 
-    # Fallback to auto-detected paths from dun_parser/dd_paths
-    from dun_parser import DUN_FILE, DEFAULT_INI
-    if DUN_FILE and os.path.isfile(DUN_FILE):
-        return DUN_FILE, DEFAULT_INI
-
     return "", ""
 
 # ── Wiki URL helpers ──────────────────────────────────────────────────────────
@@ -748,16 +743,27 @@ for _m_title, _m_sid, _m_reqs, _m_color in META_DEFS:
 
 # ── Save-file parser ──────────────────────────────────────────────────────────
 
-def load_ach_index(ini_path: str) -> list[str]:
-    """Parse UDKEngineSteamworks.ini and return Steam achievement IDs in order."""
+def load_ach_index(ini_path: str = "") -> list[str]:
+    """Return Steam achievement IDs in save-byte order (game INI or bundled JSON)."""
     pattern = re.compile(r'AchievementMapping=\(SteamAchievementID="([^"]+)"', re.IGNORECASE)
-    result = []
-    with open(ini_path, 'r', encoding='utf-8', errors='replace') as f:
-        for line in f:
-            m = pattern.search(line)
-            if m:
-                result.append(m.group(1))
-    return result
+    if ini_path and os.path.isfile(ini_path):
+        result: list[str] = []
+        with open(ini_path, 'r', encoding='utf-8', errors='replace') as f:
+            for line in f:
+                m = pattern.search(line)
+                if m:
+                    result.append(m.group(1))
+        if result:
+            return result
+    if os.path.isfile(_BUNDLED_ACH_INDEX_JSON):
+        with open(_BUNDLED_ACH_INDEX_JSON, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+        if isinstance(data, list) and data:
+            return [str(x) for x in data]
+    raise FileNotFoundError(
+        "Steam achievement index not found. Expected bundled "
+        f"steam_achievement_index.json beside the script, or a valid {_INI_FILENAME}."
+    )
 
 
 def get_unlocked_steam_ids(dun_path: str, ini_path: str) -> set[str]:
@@ -1695,25 +1701,18 @@ class AchievementTrackerWidget(QWidget):
             self._rebuild_list()
             return
 
-        if not self._ini_path or not os.path.isfile(self._ini_path):
-            self._unlocked = set()
-            self._beaten_levels = {}
-            self._status_lbl.setObjectName("status_err")
-            self._status_lbl.setText(
-                "Could not find UDKEngineSteamworks.ini next to this install "
-                "(expected under UDKGame/Config/)"
-            )
-            self._status_lbl.setStyle(self._status_lbl.style())
-            self._update_meta_cards()
-            self._rebuild_list()
-            return
-
         self._status_lbl.setObjectName("status_ok")
         try:
             self._unlocked = get_unlocked_steam_ids(self._dun_path, self._ini_path)
             self._beaten_levels = get_savefile_beaten_levels(self._dun_path)
+            index_source = (
+                "game INI"
+                if self._ini_path and os.path.isfile(self._ini_path)
+                else "bundled index"
+            )
             self._status_lbl.setText(
-                f"Loaded — {len(self._unlocked)} Steam achievements / {len(self._beaten_levels)} level completions verified"
+                f"Loaded — {len(self._unlocked)} Steam achievements / "
+                f"{len(self._beaten_levels)} level completions ({index_source})"
             )
         except Exception as e:
             import traceback
