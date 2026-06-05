@@ -6,14 +6,15 @@ Reads your DunDefHeroes.dun save file and shows which of the 163
 Dungeon Defenders achievements you have unlocked.
 
 Usage:
-    python achievement_tracker.py
+    Double-click achievement_tracker.pyw   (Windows — no console)
+    python achievement_tracker.py          (terminal)
 
 Requirements:
     pip install PySide6
 
-Your .dun file is auto-detected from common Steam library locations.
-Use the Browse button to point it at any .dun file (including other
-players' saves).
+Your .dun file is not auto-detected — click Browse on first launch to
+select DunDefHeroes.dun. The path is remembered in _ach_manual.json for
+later runs.
 """
 import sys, os, re, struct, json
 from urllib.parse import quote as _url_quote
@@ -25,24 +26,49 @@ sys.path.insert(0, _SCRIPT_DIR)
 from dun_parser import (
     decompress_dun, BinaryReader,
     parse_options_info, parse_hero_info, parse_equipment,
-    MAX_ACHIEVEMENTS, DUN_FILE, DEFAULT_INI,
+    MAX_ACHIEVEMENTS,
     get_savefile_beaten_levels,
 )
 
-from PySide6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QLabel, QPushButton, QCheckBox, QLineEdit, QScrollArea, QFrame,
-    QFileDialog, QSizePolicy, QProgressBar, QButtonGroup,
-)
-from PySide6.QtCore import Qt, QTimer, QUrl
-from PySide6.QtGui import QFont, QColor, QDesktopServices
-
-# ── Paths ─────────────────────────────────────────────────────────────────────
-_DEFAULT_INI = DEFAULT_INI
 _MANUAL_JSON = os.path.join(_SCRIPT_DIR, "_ach_manual.json")
+_INI_FILENAME = "UDKEngineSteamworks.ini"
+
+try:
+    from PySide6.QtWidgets import (
+        QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+        QLabel, QPushButton, QLineEdit, QScrollArea, QFrame,
+        QFileDialog, QSizePolicy, QProgressBar, QButtonGroup,
+    )
+    from PySide6.QtCore import Qt, QTimer, QUrl
+    from PySide6.QtGui import QFont, QColor, QDesktopServices
+except ImportError:
+    try:
+        import tkinter as tk
+        from tkinter import messagebox
+        root = tk.Tk()
+        root.withdraw()
+        messagebox.showerror(
+            "Dependency Missing",
+            "PySide6 is not installed in the active Python environment.\n\n"
+            "Please install it by running:\n"
+            "pip install PySide6\n\n"
+            f"Current Python: {sys.executable}"
+        )
+    except ImportError:
+        pass
+    print("\n[ERROR] PySide6 is not installed in this Python environment!", file=sys.stderr)
+    print("Please run: pip install PySide6", file=sys.stderr)
+    print(f"Current Python: {sys.executable}\n", file=sys.stderr)
+    if sys.stdout is not None and sys.stderr is not None:
+        try:
+            if sys.stdin is not None and sys.stdin.isatty():
+                input("Press Enter to exit...")
+        except Exception:
+            pass
+    sys.exit(1)
 
 # ── Achievement data (name, description, category, steam_id) ─────────────────
-# steam_id = None  →  non-Steam achievement (manual checkbox)
+# steam_id = None  →  non-Steam achievement (not in save file)
 ACHIEVEMENTS = [
     # ── Equipment (indices 0-2, 6, 44-45, 53) ────────────────────────────────
     ("Smithy",                              "You upgraded your first equipment. Keep it up!",                            "Equipment",     "ACH_SMITHY"),
@@ -328,18 +354,335 @@ META_DEFS = [
     ("Chromatic Defender",  None,                    [],              "#3498db"),
 ]
 
+_META_SECTION_KEYS = {
+    "Legendary Defender": "legendary",
+    "Ultimate Defender": "ultimate",
+    "Eternal Defender": "eternal",
+    "Ruthless Defender": "ruthless",
+    "Chromatic Defender": "chromatic",
+}
+
+RUTHLESS_CAMPAIGN_MAPS: list[tuple[str, str]] = [
+    ("CAMPDW", "The Deeper Well"), ("CAMPFF", "Foundry Forger"), ("CAMPAL", "Alchemical Laboratory"),
+    ("CAMPMQ", "Magus Quarters"), ("CAMPSQ", "Servants Quarters"), ("CAMPCA", "Castle Armory"),
+    ("CAMPHC", "Hall of Court"), ("CAMPTR", "The Throne Room"), ("CAMPRG", "Royal Gardens"),
+    ("CAMPRP", "Ramparts"), ("CAMPES", "Endless Spires"), ("CAMPTS", "The Summit"),
+    ("CAMPGC", "Glitterhelm Caverns"),
+]
+RUTHLESS_CHALLENGE_MAPS: list[tuple[str, str]] = [
+    ("SPECDW", "No Towers Allowed"), ("SPECFF", "Unlikely Allies"), ("WARPP1", "Warping Core"),
+    ("SPECHW", "Halloween Spooktacular"), ("SPECMQ", "Magus Quarters Challenge"), ("SPECOA", "Ogre Crush"),
+    ("SPECAL", "Wizardry"), ("SPECSQ", "Zippy Terror"), ("SPECCA", "Spooktacular Bay"),
+    ("SPECHC", "Chicken"), ("SPECTR", "Moving Core"), ("SPECRG", "Death From Above"),
+    ("SPECTH", "Treasure Hunt"),
+]
+CHROMATIC_MAPS: list[tuple[str, str]] = [
+    ("SPECCA", "Spooktacular Bay"),
+    ("SPECHW", "Halloween Spooktacular"),
+    ("LHOLOC", "Lifestream Hollow"),
+    ("VDAY03", "Lover's Paradise"),
+    ("RETMIS", "Mistymire Forest"),
+    ("RETMOR", "Moraggo Desert Town"),
+    ("RETAQU", "Aquanos"),
+    ("RETSKY", "Sky City"),
+    ("RETCRD", "Crystalline Dimension"),
+    ("CDTARA", "Scorched Arabia"),
+    ("CDTTWC", "Warping Core II"),
+    ("SPECGC", "Boss Rush II"),
+]
+
+_RUTHLESS_HC_BIT = 1 << 11
+_NM_HC_BIT = 1 << 10
+
+# ── Chiku guide hunt order (Guides/Chiku's Dungeon Defenders Achievements Guide.md)
+CHIKU_SECTIONS: list[tuple[str, str, str]] = [
+    ("intro", "Introduction",
+     "Tutorial and tavern-core checks (F) for per-map award progress."),
+    ("campaign_stack", "Campaign Megastack — Deeper Well → Glitterhelm",
+     "Chiku NM HC stack: 4 splitscreen heroes, hero-only (Gunslinger), flawless core after wave 1, "
+     "no deaths — Brute Force + Perfectionist + Team Effort + Mythical/Hardcore Mythical Defender + campaign clears."),
+    ("campaign_awards", "Campaign Awards — Cleanup",
+     "Daredevil: chip core to ≤100 HP on wave 1 only (6 maps), then flawless. "
+     "Mastermind pairs with Mythical RTS (tower final wave only). Perspective: 4 Summit runs."),
+    ("campaign_diff", "Campaign Difficulty Trophies",
+     "Area Hard/Insane/Any clears — NM runs do not retroactively grant Hard/Insane area achievements."),
+    ("free", "Free Achievements & Economy",
+     "Earn passively while upgrading gear, leveling heroes, and banking mana."),
+    ("challenges", "Main Campaign Challenges",
+     "All 12 original challenges on NM HC → Transcendent Challenge Champion + tiered challenge trophies."),
+    ("survival", "Survival & Pure Strategy",
+     "Transcendent Survivalist (wave 24, lose 25) also completes Survivalist / Thick Skin / Tough Guy / Iron Man."),
+    ("pets", "Pet Achievements",
+     "31 pets — mostly survival wave 25; Sky of Love, Assault Pack, Summit guardians, Presidential Royale."),
+    ("shards", "Summoner & Eternia Shards",
+     "Mythical RTS on campaign + Mistymire/Moraggo/Aquanos; Sky City shard separate. Mastermind stacks if towers only on final wave."),
+    ("ultimate_dlc", "Ultimate Defender — Seasonal & Assault",
+     "Jingled All the Way, Assault Pack, Sky o' Love — often done during pet/survival farming."),
+    ("meta_ud", "Meta — Ultimate & Legendary Defender",
+     "Legendary = base game; Ultimate = Legendary + Eternia Shards DLC set."),
+    ("eternal", "Eternal Defender — Lost Quests",
+     "After Ultimate: all listed Lost Quest maps on Nightmare (manual CDT/DDT entries included)."),
+    ("ddt_manual", "DDT Manual Achievements",
+     "Post-Eternal content — not stored in Steam save."),
+    ("ruthless", "Ruthless Defender",
+     "Late game: original campaign + 12 challenges on Ruthless HC (~6k+ tower stats)."),
+    ("chromatic", "Chromatic Defender",
+     "After Ruthless: Spooktacular Bay → Scorched Arabia + Warping Core II → Boss Rush II on NM HC."),
+    ("extras", "Seasonal & DLC Extras",
+     "Not required for Ultimate/Eternal — holiday packs, Tinkerer's Lab, etc."),
+]
+
+CHIKU_SECTION_MEMBERS: dict[str, list[str]] = {
+    "intro": ["Good Student"],
+    "campaign_stack": [
+        "Brute Force", "Perfectionist", "Team Effort",
+        "Mythical Defender", "Hardcore Mythical Defender", "True Nobility",
+    ],
+    "campaign_awards": ["Daredevil", "Mastermind", "A Matter of Perspective"],
+    "campaign_diff": [
+        "From the Depths", "To the Rooftops", "A Taste of Victory", "Dungeon Crawler",
+        "The Belly of the Beast", "The Body of the Beast", "The Crown of the Beast",
+        "Dungeon Raider (Campaign)",
+        "From Fire with Brimstone", "Through The Crowded Keep", "To the Lofty Summit",
+        "Dungeon Defender",
+    ],
+    "free": [
+        "Smithy", "And This Is My Weapon", "To The Limit", "Divine Intention",
+        "O Mighty Smiter!", "Obedience Training",
+        "Pupil", "Veteran", "Defender of Etheria", "Group Hug", "Master Banker",
+        "Catch 'em All",
+    ],
+    "challenges": [
+        "Transcendent Challenge Champion", "Ruthless Defender",
+        "Where's The Blueprints?", "Weapon Master", "Friends Forever", "88 Core",
+        "Ella, Ella", "Dancing in the Rain", "Wizard Hunter", "You No Take Mushroom",
+        "Ogre Block Party", "Speed Freak", "Kobold Exterminator",
+        "In A Fowl Mood", "Core Cardio", "Monster Mania", "Monster Madness",
+        "Core Destroyer", "Gold Rush", "Gold Blitz",
+        "A Challenger Approaches",
+    ],
+    "survival": [
+        "Defense Is the Best Offense",
+        "Transcendent Survivalist", "Iron Man", "Tough Guy", "Survivalist", "Thick Skin",
+    ],
+    "pets": [
+        "I've Got Monsters in My Pocket",
+        "Dungeon Raider (Assault)", "Mythical Dungeon Raider",
+        "Playin' Cupid", "Playin' Mythical Cupid",
+    ],
+    "shards": [
+        "Real Time Strategist", "Mythical Real Time Strategist",
+        "Eternia Shard Recovered: Purple", "Nightmare Eternia Shard: Purple",
+        "Portal Protector", "Nightmare Portal Protector",
+        "Eternia Shard Recovered: Blue", "Nightmare Eternia Shard: Blue",
+        "Djinn Recruiter", "Nightmare Djinn Recruiter",
+        "Eternia Shard Recovered: Yellow", "Nightmare Eternia Shard: Yellow",
+        "Puzzle Solver", "Nightmare Puzzle Solver",
+        "Eternia Shard Recovered: Red", "Nightmare Eternia Shard: Red",
+        "Boss Crusher", "Nightmare Boss Crusher",
+        "Heroes to the Rescue", "Nightmare Heroes to the Rescue",
+    ],
+    "ultimate_dlc": ["Jingled All the Way"],
+    "meta_ud": ["Legendary Defender", "Ultimate Defender"],
+    "eternal": [
+        "Eternal Defender",
+        "Trial by Fire and Lightning", "Nightmare Trial by Fire and Lightning",
+        "Out of this World", "Nightmare Out of this World",
+        "Hero of Water", "Nightmare Hero of Water",
+        "Swashbuckler", "Nightmare Swashbuckler",
+        "Crystalline Resurgence", "Nightmare Crystalline Resurgence",
+        "Nightmare A Very Misty Christmas", "Nightmare Exterminator",
+        "Nightmare Slayer of Omenak", "Nightmare Tomb of Etheria",
+        "Nightmare Soothing Dungeoneer", "Nightmare Successful Librarian",
+        "Nightmare Pirate Defender", "Coastal Merchant", "Nightmare Coastal Merchant",
+        "Nightmare Phoenix Handler", "Nightmare Polybius Invader",
+        "Nightmare Egg Escorter", "Nightmare Emerald Explorer", "Nightmare Magus Citizen",
+    ],
+    "ddt_manual": [
+        "Spooky Swashbuckler", "Nightmare Spooky Swashbuckler",
+        "Halloween Defender", "Nightmare Halloween Defender",
+        "Nature Enthusiast", "Nightmare Nature Enthusiast",
+        "Tavern Defender", "Nightmare Tavern Defender",
+        "Love Defender", "Nightmare Love Defender",
+        "Heart Wanderer", "Nightmare Heart Wanderer",
+        "Lifestream Hollow Defender", "Nightmare Lifestream Hollow Defender",
+        "Forest Ogre Crusher", "Nightmare Forest Ogre Crusher",
+        "Nightmare Jester's Spooktacular Trick-o-Treater",
+        "Nightmare Frostdale Christmas Defender",
+        "Nightmare Valentine Citadel Lover", "Nightmare Love Machine Worker",
+        "Returnia Part 1", "Returnia Part 2", "Returnia Part 3",
+        "Returnia Part 4", "Returnia Part 5",
+        "Nightmare Workshop Defender", "Nightmare Workshop Dweller",
+        "Nightmare Sky Trick O'Treater", "Nightmare Royal Helper",
+        "Nightmare Scorched Defender", "Nightmare Boss Rusher",
+        "Nightmare Revenge Lover",
+    ],
+    "ruthless": [],
+    "chromatic": ["Chromatic Defender"],
+    "extras": [
+        "Anniversary Defender", "Nightmare Anniversary Defender",
+        "Pumpkin Party", "Pumpkin Party Nightmare",
+        "Greater Turkey Hunter", "Nightmare Greater Turkey Hunter",
+        "Not So Silent Night", "Nightmare Not So Silent Night",
+        "Winter Wonderland", "Nightmare Winter Wonderland",
+        "Playin' Anticupid", "Nightmare Playin' Anticupid",
+        "Tinkerer's Defender", "Nightmare Tinkerer's Defender",
+        "EV Reprogrammer", "Nightmare EV Reprogrammer",
+    ],
+}
+
+# Flat Chiku sort index (first section wins for duplicates)
+_CHIKU_SORT_INDEX: dict[str, int] = {}
+_CHIKU_SECTION_FOR: dict[str, str] = {}
+_chiku_idx = 0
+for _sec_key, _sec_title, _sec_blurb in CHIKU_SECTIONS:
+    for _ach_name in CHIKU_SECTION_MEMBERS.get(_sec_key, []):
+        if _ach_name not in _CHIKU_SORT_INDEX:
+            _CHIKU_SORT_INDEX[_ach_name] = _chiku_idx
+            _CHIKU_SECTION_FOR[_ach_name] = _sec_key
+            _chiku_idx += 1
+_CHIKU_SECTION_LOOKUP = {k: (t, b) for k, t, b in CHIKU_SECTIONS}
+_ACH_DEFAULT_INDEX: dict[str, int] = {row[0]: i for i, row in enumerate(ACHIEVEMENTS)}
+
+# Per-achievement Chiku tips / stack hints (shown on each row)
+ACH_TIPS: dict[str, str] = {
+    "Good Student": "Ranked tutorial or local tutorial toggle — verify in tavern if missing.",
+    "Brute Force": "Gunslinger on all 13 campaign maps — hero/pet/ability kills only after wave 1; CC towers OK (EV beam, Ensnare, Gas).",
+    "Perfectionist": "Flawless Victory on all 13 campaign maps (≥ Medium) — zero core damage after wave 1.",
+    "Daredevil": "Skin of Your Teeth on 6 maps — chip core to ≤100 HP on wave 1, then stay flawless (works on Insane/NM).",
+    "Mastermind": "Master Strategist on all 13 campaign maps — tower-only kills; done automatically with Mythical RTS if final wave is tower-only.",
+    "Team Effort": "Teamwork award on all 13 maps — use 4 active heroes (F2–F8 emulator counts solo).",
+    "Mythical Defender": "Clear all 13 original campaign maps on Nightmare.",
+    "Hardcore Mythical Defender": "All 13 campaign maps on Nightmare Hardcore without dying.",
+    "True Nobility": "Lord award — kill 50 enemies in 5 seconds (≥ Medium); natural on hero-DPS megastack runs.",
+    "A Matter of Perspective": "Defeat Summit boss as P1 with Apprentice, Monk, Huntress, and Squire — 4 runs minimum.",
+    "Transcendent Challenge Champion": "All 12 original challenges on Nightmare Hardcore — also unlocks lower challenge tiers.",
+    "Transcendent Survivalist": "NM survival wave 25 on all campaign maps + City in the Cliffs — wave 24 clear + lose 25 is enough.",
+    "Defense Is the Best Offense": "Pure Strategy wave 10 on all 13 campaign maps + Glitterhelm (≥ Medium) — can stop at wave 9 and lose wave 10.",
+    "Mythical Real Time Strategist": "Campaign + Mistymire/Moraggo/Aquanos on NM — minion/Overlord damage only except final wave; no DPS pets.",
+    "Real Time Strategist": "Same as Mythical RTS but any difficulty.",
+    "I've Got Monsters in My Pocket": "All 31 pet types in item box — overlaps heavily with survival pet farming.",
+    "Jingled All the Way": "Etherian Holiday Extravaganza — any difficulty; gas-trap spawns recommended.",
+    "Ruthless Defender": "Original campaign + 12 challenges on Ruthless HC — Chiku recommends deferring until ~6k tower stats.",
+    "Chromatic Defender": "Requires Ruthless Defender first, then DDT Lost Quest + challenge maps on NM HC.",
+    "No Towers Allowed": "Natural hero-DPS map — stack with Brute Force mindset; run NM HC for Transcendent Challenge Champion.",
+}
+
+ACH_STACKS_WITH: dict[str, list[str]] = {
+    "Brute Force": [
+        "Perfectionist", "Team Effort", "Mythical Defender", "Hardcore Mythical Defender",
+        "True Nobility", "From the Depths", "Dungeon Crawler", "Dungeon Defender",
+    ],
+    "Perfectionist": ["Brute Force", "Team Effort", "Mythical Defender", "Hardcore Mythical Defender", "Daredevil"],
+    "Daredevil": ["Perfectionist", "Brute Force"],
+    "Team Effort": ["Brute Force", "Perfectionist", "Mythical Defender", "Hardcore Mythical Defender"],
+    "Mythical Defender": ["Brute Force", "Perfectionist", "Team Effort", "Hardcore Mythical Defender"],
+    "Hardcore Mythical Defender": ["Brute Force", "Perfectionist", "Team Effort", "Mythical Defender"],
+    "Mastermind": ["Mythical Real Time Strategist", "Real Time Strategist"],
+    "Mythical Real Time Strategist": [
+        "Mastermind", "Eternia Shard Recovered: Purple", "Nightmare Eternia Shard: Purple",
+        "Eternia Shard Recovered: Blue", "Nightmare Eternia Shard: Blue",
+        "Eternia Shard Recovered: Yellow", "Nightmare Eternia Shard: Yellow",
+    ],
+    "Transcendent Survivalist": ["Survivalist", "Thick Skin", "Tough Guy", "Iron Man"],
+    "Transcendent Challenge Champion": [
+        "A Challenger Approaches", "Weapon Master", "Kobold Exterminator",
+        "Monster Madness", "Dancing in the Rain", "Gold Blitz", "Ogre Block Party",
+    ],
+}
+
+# Meta sort groups (inner path: Legendary → Ultimate-only → Eternal-only → manual metas)
+_LEGENDARY_SET = set(_LEGENDARY_REQS) | {"Legendary Defender"}
+_ULTIMATE_ONLY = [n for n in _ULTIMATE_REQS if n not in _LEGENDARY_SET and n != "Legendary Defender"]
+_ULTIMATE_ONLY_SET = set(_ULTIMATE_ONLY) | {"Ultimate Defender"}
+_ETERNAL_ONLY = [n for n in _ETERNAL_REQS if n not in _ULTIMATE_REQS and n != "Ultimate Defender"]
+_ETERNAL_ONLY_SET = set(_ETERNAL_ONLY) | {"Eternal Defender"}
+
+META_SORT_GROUPS: list[tuple[str, str, set[str]]] = [
+    ("legendary", "Legendary Defender", _LEGENDARY_SET),
+    ("ultimate", "Ultimate Defender (DLC)", _ULTIMATE_ONLY_SET),
+    ("eternal", "Eternal Defender (Lost Quests)", _ETERNAL_ONLY_SET),
+    ("ruthless", "Ruthless Defender", {"Ruthless Defender"}),
+    ("chromatic", "Chromatic Defender", {"Chromatic Defender"}),
+    ("other", "Other / Not on Meta Path", set()),
+]
+
+_META_GROUP_FOR: dict[str, str] = {}
+_META_GROUP_TITLE: dict[str, str] = {}
+for _gkey, _gtitle, _gmembers in META_SORT_GROUPS:
+    _META_GROUP_TITLE[_gkey] = _gtitle
+    for _member in _gmembers:
+        _META_GROUP_FOR[_member] = _gkey
+
+_SORT_MODES = ("default", "chiku", "meta")
+_SETTINGS_KEY = "_ui_settings"
+
 # ── Manual state helpers ──────────────────────────────────────────────────────
 
 def _load_manual(path: str) -> dict:
     try:
         with open(path, 'r', encoding='utf-8') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
+            data = json.load(f)
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        pass
+    return {}
 
-def _save_manual(path: str, state: dict) -> None:
-    with open(path, 'w', encoding='utf-8') as f:
-        json.dump(state, f, indent=2, ensure_ascii=False)
+
+def _split_manual_state(raw: dict) -> tuple[dict, dict]:
+    """Return (achievement_manual_checkboxes, ui_settings)."""
+    settings = raw.get(_SETTINGS_KEY, {})
+    if not isinstance(settings, dict):
+        settings = {}
+    manual = {k: v for k, v in raw.items() if k != _SETTINGS_KEY and isinstance(v, bool)}
+    return manual, settings
+
+
+def _save_manual(path: str, manual: dict, settings: dict | None = None) -> None:
+    payload = dict(manual)
+    if settings:
+        payload[_SETTINGS_KEY] = settings
+    try:
+        with open(path, 'w', encoding='utf-8') as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+    except Exception as e:
+        print(f"[Error saving manual state]: {e}", file=sys.stderr, flush=True)
+
+
+def _ini_path_for_dun(dun_path: str) -> str:
+    """Derive UDKEngineSteamworks.ini from a standard DunDefHeroes.dun path."""
+    parts = os.path.normpath(dun_path).split(os.sep)
+    try:
+        idx = parts.index("Binaries")
+    except ValueError:
+        return ""
+    game_root = os.sep.join(parts[:idx])
+    return os.path.join(game_root, "UDKGame", "Config", _INI_FILENAME)
+
+
+def _resolve_save_paths(
+    dun_path: str | None,
+    ini_path: str | None,
+    ui_settings: dict,
+) -> tuple[str, str]:
+    """Use explicit paths, else last saved paths from _ach_manual.json, else none."""
+    if dun_path and os.path.isfile(dun_path):
+        ini = ini_path if ini_path and os.path.isfile(ini_path) else _ini_path_for_dun(dun_path)
+        return dun_path, ini
+
+    saved_dun = ui_settings.get("dun_path", "")
+    if saved_dun and os.path.isfile(saved_dun):
+        saved_ini = ui_settings.get("ini_path", "")
+        ini = saved_ini if saved_ini and os.path.isfile(saved_ini) else _ini_path_for_dun(saved_dun)
+        return saved_dun, ini
+
+    # Fallback to auto-detected paths from dun_parser/dd_paths
+    from dun_parser import DUN_FILE, DEFAULT_INI
+    if DUN_FILE and os.path.isfile(DUN_FILE):
+        return DUN_FILE, DEFAULT_INI
+
+    return "", ""
 
 # ── Wiki URL helpers ──────────────────────────────────────────────────────────
 _WIKI_BASE = "https://dungeondefenders.wiki.gg/wiki/"
@@ -414,120 +757,349 @@ def get_unlocked_steam_ids(dun_path: str, ini_path: str) -> set[str]:
             unlocked.add(ach_index[idx])
     return unlocked
 
-# ── Stylesheet ────────────────────────────────────────────────────────────────
-STYLESHEET = """
-QMainWindow, QWidget#root {
+# ── UI typography & spacing (single source of truth — tune sizes here only) ───
+UI_FONT: dict[str, int] = {
+    "base":       17,
+    "title":      24,
+    "counter":    18,
+    "status":     16,
+    "search":     17,
+    "button":     15,
+    "toggle":     15,
+    "section":    15,
+    "blurb":      14,
+    "ach_name":   17,
+    "ach_desc":   15,
+    "ach_detail": 14,
+    "ach_badge":  15,
+    "ach_dot":    20,
+    "meta_title": 15,
+    "meta_body":  15,
+    "path":       15,
+    "hint":       15,
+}
+
+UI_PAD: dict[str, int] = {
+    "card_v":         8,
+    "card_h":         12,
+    "row_gap":        4,
+    "toggle_x":       12,
+    "toggle_y":       4,
+    "button_x":       10,
+    "button_y":       4,
+    "toggle_slack_x": 10,
+    "toggle_slack_y": 4,
+}
+
+
+def build_stylesheet(fonts: dict[str, int] | None = None) -> str:
+    """Build the app stylesheet from UI_FONT so sizes stay in sync everywhere."""
+    f = fonts or UI_FONT
+    return f"""
+QMainWindow, QWidget#root {{
     background: #1e1e1e;
     color: #d4d4d4;
-}
-QWidget {
+}}
+QWidget {{
     background: #1e1e1e;
     color: #d4d4d4;
     font-family: Segoe UI, Arial, sans-serif;
-    font-size: 13px;
-}
-QLabel#title {
-    font-size: 20px;
+    font-size: {f['base']}px;
+}}
+QLabel#title {{
+    font-size: {f['title']}px;
     font-weight: bold;
     color: #ffffff;
-}
-QLabel#counter {
-    font-size: 14px;
+}}
+QLabel#counter {{
+    font-size: {f['counter']}px;
     color: #9cdcfe;
     font-weight: bold;
-}
-QLabel#status_ok  { color: #4ec94e; font-size: 12px; }
-QLabel#status_err { color: #f48771; font-size: 12px; }
-QLineEdit#search {
+}}
+QLabel#status_ok  {{ color: #4ec94e; font-size: {f['status']}px; }}
+QLabel#status_err {{ color: #f48771; font-size: {f['status']}px; }}
+QLabel#path_lbl   {{ color: #808080; font-size: {f['path']}px; }}
+QLabel#hint_lbl   {{ color: #808080; font-size: {f['hint']}px; }}
+QLineEdit#search {{
     background: #2d2d2d;
     border: 1px solid #3c3c3c;
     border-radius: 6px;
     padding: 6px 10px;
     color: #d4d4d4;
-    font-size: 13px;
-}
-QLineEdit#search:focus { border: 1px solid #007acc; }
-QPushButton {
+    font-size: {f['search']}px;
+    min-height: {f['search'] + 8}px;
+}}
+QLineEdit#search:focus {{ border: 1px solid #007acc; }}
+QPushButton {{
     background: #007acc;
     color: #ffffff;
     border: none;
-    border-radius: 5px;
-    padding: 6px 14px;
-    font-size: 12px;
+    border-radius: 4px;
+    padding: {UI_PAD['button_y']}px {UI_PAD['button_x']}px;
+    font-size: {f['button']}px;
     font-weight: bold;
-}
-QPushButton:hover   { background: #1a8cdd; }
-QPushButton:pressed { background: #005fa3; }
-QPushButton#browse_btn { background: #3c3c3c; color: #d4d4d4; }
-QPushButton#browse_btn:hover { background: #4f4f4f; }
-QScrollArea { border: none; background: #1e1e1e; }
-QScrollBar:vertical { background: #2d2d2d; width: 8px; border-radius: 4px; }
-QScrollBar::handle:vertical { background: #555; border-radius: 4px; min-height: 20px; }
-QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-QLabel#section_header {
-    font-size: 11px;
+    min-height: {f['button'] + UI_PAD['button_y'] * 2 + 2}px;
+}}
+QPushButton:hover   {{ background: #1a8cdd; }}
+QPushButton:pressed {{ background: #005fa3; }}
+QPushButton#browse_btn {{ background: #3c3c3c; color: #d4d4d4; }}
+QPushButton#browse_btn:hover {{ background: #4f4f4f; }}
+QScrollArea {{ border: none; background: #1e1e1e; }}
+QScrollBar:vertical {{ background: #2d2d2d; width: 8px; border-radius: 4px; }}
+QScrollBar::handle:vertical {{ background: #555; border-radius: 4px; min-height: 20px; }}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+QLabel#section_header {{
+    font-size: {f['section']}px;
     font-weight: bold;
     color: #808080;
     letter-spacing: 1px;
-}
-QFrame#card      { background: #252526; border: 1px solid #2d2d2d; border-radius: 8px; }
-QFrame#card_done { background: #1e2d1e; border: 1px solid #2d4a2d; border-radius: 8px; }
-QFrame#meta_card      { background: #252526; border: 1px solid #2d2d2d; border-radius: 8px; }
-QFrame#meta_card_done { background: #1e2d1e; border: 1px solid #2d4a2d; border-radius: 8px; }
-QProgressBar { background: #3c3c3c; border: none; border-radius: 2px; }
-QProgressBar::chunk { background: #007acc; border-radius: 2px; }
-QPushButton#filter_btn {
+    padding-top: 6px;
+}}
+QFrame#card, QFrame#card_done {{
+    border-radius: 8px;
+}}
+QFrame#card      {{ background: #252526; border: 1px solid #2d2d2d; }}
+QFrame#card_done {{ background: #1e2d1e; border: 1px solid #2d4a2d; }}
+QFrame#meta_card, QFrame#meta_card_done {{
+    border-radius: 8px;
+    min-width: 145px;
+}}
+QFrame#meta_card      {{ background: #252526; border: 1px solid #2d2d2d; }}
+QFrame#meta_card_done {{ background: #1e2d1e; border: 1px solid #2d4a2d; }}
+QFrame#meta_card:hover, QFrame#meta_card_done:hover {{
+    border: 2px solid #007acc;
+    background: #2a2a2b;
+}}
+QPushButton#map_expand_btn_ruthless {{
+    background: #c0392b;
+    color: #ffffff;
+    border: 3px solid #ff6b6b;
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 16px;
+    font-weight: bold;
+    min-height: 52px;
+    text-align: center;
+}}
+QPushButton#map_expand_btn_ruthless:hover {{
+    background: #e74c3c;
+    border-color: #ff8787;
+}}
+QPushButton#map_expand_btn_ruthless:pressed {{
+    background: #922b21;
+}}
+QPushButton#map_expand_btn_chromatic {{
+    background: #2471a3;
+    color: #ffffff;
+    border: 3px solid #5dade2;
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 16px;
+    font-weight: bold;
+    min-height: 52px;
+    text-align: center;
+}}
+QPushButton#map_expand_btn_chromatic:hover {{
+    background: #3498db;
+    border-color: #85c1e9;
+}}
+QPushButton#map_expand_btn_chromatic:pressed {{
+    background: #1a5276;
+}}
+QFrame#map_row_done {{
+    background: #1e2d1e;
+    border: 1px solid #2d4a2d;
+    border-radius: 6px;
+}}
+QFrame#map_row_missing {{
+    background: #2d2525;
+    border: 1px solid #5a3030;
+    border-radius: 6px;
+}}
+QLabel#map_row_name_done {{
+    color: #ffffff;
+    font-weight: bold;
+    font-size: {f['ach_desc']}px;
+    background: transparent;
+    border: none;
+}}
+QLabel#map_row_name_missing {{
+    color: #f48771;
+    font-weight: bold;
+    font-size: {f['ach_desc']}px;
+    background: transparent;
+    border: none;
+}}
+QProgressBar {{ background: #3c3c3c; border: none; border-radius: 2px; }}
+QProgressBar::chunk {{ background: #007acc; border-radius: 2px; }}
+QPushButton#filter_btn, QPushButton#sort_btn {{
     background: #2d2d2d;
     color: #808080;
     border: 1px solid #3c3c3c;
-    border-radius: 5px;
-    padding: 5px 14px;
-    font-size: 12px;
+    border-radius: 4px;
+    padding: {UI_PAD['toggle_y']}px {UI_PAD['toggle_x']}px;
+    font-size: {f['toggle']}px;
     font-weight: normal;
-}
-QPushButton#filter_btn:checked {
+    min-height: {f['toggle'] + UI_PAD['toggle_y'] * 2 + 2}px;
+}}
+QPushButton#sort_btn {{
+    background: #252526;
+}}
+QPushButton#filter_btn:checked {{
     background: #007acc;
     color: #ffffff;
     border-color: #007acc;
+}}
+QPushButton#sort_btn:checked {{
+    background: #264f78;
+    color: #9cdcfe;
+    border-color: #007acc;
+}}
+QPushButton#filter_btn:hover:!checked, QPushButton#sort_btn:hover:!checked {{
+    background: #3c3c3c;
+    color: #d4d4d4;
+}}
+QLabel#section_blurb {{
+    font-size: {f['blurb']}px;
+    color: #6a9955;
+    font-style: italic;
+    padding: 0 4px 6px 4px;
+}}
+QLabel#ach_name {{
+    font-size: {f['ach_name']}px;
     font-weight: bold;
-}
-QPushButton#filter_btn:hover:!checked { background: #3c3c3c; color: #d4d4d4; }
-QCheckBox { background: transparent; color: #d4d4d4; spacing: 5px; }
-QCheckBox::indicator {
-    width: 15px; height: 15px;
-    border: 1px solid #555;
-    border-radius: 3px;
-    background: #2d2d2d;
-}
-QCheckBox::indicator:checked  { background: #4ec94e; border-color: #4ec94e; }
-QCheckBox::indicator:hover    { border-color: #888; }
+    color: #9d9d9d;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_name_done {{
+    font-size: {f['ach_name']}px;
+    font-weight: bold;
+    color: #ffffff;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_desc {{
+    font-size: {f['ach_desc']}px;
+    color: #707070;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_tip {{
+    font-size: {f['ach_detail']}px;
+    color: #6eb3f7;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_stack {{
+    font-size: {f['ach_detail']}px;
+    color: #ce9178;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_meta_tag {{
+    font-size: {f['ach_detail']}px;
+    color: #999999;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_dot {{
+    font-size: {f['ach_dot']}px;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_badge, QLabel#ach_badge_warn {{
+    font-size: {f['ach_badge']}px;
+    font-weight: bold;
+    background: transparent;
+    border: none;
+}}
+QLabel#ach_badge {{ color: #4ec94e; }}
+QLabel#ach_badge_warn {{ color: #c5a028; }}
+QLabel#meta_title {{
+    font-size: {f['meta_title']}px;
+    font-weight: bold;
+    background: transparent;
+    border: none;
+}}
+QLabel#meta_body {{
+    font-size: {f['meta_body']}px;
+    color: #808080;
+    background: transparent;
+    border: none;
+}}
+QLabel#meta_body_done {{
+    font-size: {f['meta_body']}px;
+    color: #4ec94e;
+    font-weight: bold;
+    background: transparent;
+    border: none;
+}}
 """
 
+
+def _polish_widget(w) -> None:
+    """Re-apply Qt styles so sizeHint() reflects the active stylesheet."""
+    st = w.style()
+    st.unpolish(w)
+    st.polish(w)
+    w.updateGeometry()
+
+
+def _fit_toggle_button(btn) -> None:
+    """Size toggle buttons from post-stylesheet sizeHint (no fixed width guessing)."""
+    _polish_widget(btn)
+    hint = btn.sizeHint()
+    sx = UI_PAD["toggle_slack_x"]
+    sy = UI_PAD["toggle_slack_y"]
+    btn.setMinimumSize(hint.width() + sx, hint.height() + sy)
+    btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+
+def _fit_action_button(btn) -> None:
+    """Size primary row buttons (Browse, Reload) after stylesheet is active."""
+    _polish_widget(btn)
+    hint = btn.sizeHint()
+    btn.setMinimumSize(hint.width() + 4, hint.height() + 2)
+    btn.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Fixed)
+
+
+# Legacy name kept for any external imports
+STYLESHEET = build_stylesheet()
+
+
+def refresh_ui_fonts(widget: QWidget | None = None, *, delta: int = 0) -> str:
+    """Rebuild stylesheet from UI_FONT. Pass delta to bump all sizes (e.g. +2)."""
+    global STYLESHEET
+    if delta:
+        for key in UI_FONT:
+            UI_FONT[key] += delta
+    STYLESHEET = build_stylesheet()
+    if widget is not None:
+        widget.setStyleSheet(STYLESHEET)
+        if hasattr(widget, "_apply_ui_metrics"):
+            widget._apply_ui_metrics()
+    return STYLESHEET
+
 # ── Auto-unlock evaluation helpers ───────────────────────────────────────────
+
+def _map_done_on_bit(beaten_levels: dict[str, int], tag: str, bit: int) -> bool:
+    return (beaten_levels.get(tag, 0) & bit) != 0
+
 
 def check_ruthless_defender(beaten_levels: dict[str, int]) -> bool:
     """Check if all 13 original campaign maps and challenges are completed on Ruthless Hardcore."""
     if not beaten_levels:
         return False
-    campaign_tags = {
-        "CAMPDW", "CAMPFF", "CAMPAL", "CAMPMQ", "CAMPSQ", "CAMPCA",
-        "CAMPHC", "CAMPTR", "CAMPRG", "CAMPRP", "CAMPES", "CAMPTS", "CAMPGC"
-    }
-    challenge_tags = {
-        "SPECDW", "SPECFF", "WARPP1", "SPECHW", "SPECMQ", "SPECOA",
-        "SPECAL", "SPECSQ", "SPECCA", "SPECHC", "SPECTR", "SPECRG", "SPECTH"
-    }
-    ruthless_hc_bit = 1 << 11  # Bit 11 corresponds to Ruthless Hardcore
-    
-    campaign_ok = all((beaten_levels.get(tag, 0) & ruthless_hc_bit) != 0 for tag in campaign_tags)
-    
-    challenges_beaten = sum(
-        1 for tag in challenge_tags
-        if (beaten_levels.get(tag, 0) & ruthless_hc_bit) != 0
+    campaign_ok = all(
+        _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
+        for tag, _ in RUTHLESS_CAMPAIGN_MAPS
     )
-    challenges_ok = challenges_beaten >= 12
-    
-    return campaign_ok and challenges_ok
+    challenges_beaten = sum(
+        1 for tag, _ in RUTHLESS_CHALLENGE_MAPS
+        if _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
+    )
+    return campaign_ok and challenges_beaten >= 12
 
 
 def check_chromatic_defender(beaten_levels: dict[str, int]) -> bool:
@@ -536,61 +1108,73 @@ def check_chromatic_defender(beaten_levels: dict[str, int]) -> bool:
         return False
     if not check_ruthless_defender(beaten_levels):
         return False
-        
-    nm_hc_bit = 1 << 10
-    ruthless_hc_bit = 1 << 11
-    
-    required_tags = {
-        "SPECCA", # Spooktacular Bay
-        "SPECHW", # Halloween Spooktacular
-        "LHOLOC", # Lifestream Hollow
-        "VDAY03", # Lover's Paradise
-        "RETMIS", # Returnia Mistymire
-        "RETMOR", # Returnia Moraggo
-        "RETAQU", # Returnia Aquanos
-        "RETSKY", # Returnia Sky City
-        "RETCRD", # Returnia Crystalline Dimension
-        "CDTARA", # Scorched Arabia
-        "CDTTWC", # Warping Core II
-        "SPECGC", # Boss Rush II
-    }
-    
     return all(
-        ((beaten_levels.get(tag, 0) & nm_hc_bit) != 0 or (beaten_levels.get(tag, 0) & ruthless_hc_bit) != 0)
-        for tag in required_tags
+        _map_done_on_bit(beaten_levels, tag, _NM_HC_BIT)
+        or _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
+        for tag, _ in CHROMATIC_MAPS
     )
+
+
+def ruthless_map_status(beaten_levels: dict[str, int]) -> list[tuple[str, bool]]:
+    """Return display name + done flag for every Ruthless HC campaign/challenge map."""
+    maps: list[tuple[str, bool]] = []
+    for tag, name in RUTHLESS_CAMPAIGN_MAPS:
+        maps.append((f"{name} (Ruthless HC)", _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)))
+    for tag, name in RUTHLESS_CHALLENGE_MAPS:
+        maps.append((f"{name} (Ruthless HC)", _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)))
+    return maps
+
+
+def chromatic_map_status(beaten_levels: dict[str, int]) -> list[tuple[str, bool]]:
+    """Return display name + done flag for Chromatic Defender maps (incl. Ruthless prereq)."""
+    maps: list[tuple[str, bool]] = [
+        ("Prerequisite: Ruthless Defender", check_ruthless_defender(beaten_levels)),
+    ]
+    for tag, name in CHROMATIC_MAPS:
+        mask = beaten_levels.get(tag, 0)
+        done = (mask & _NM_HC_BIT) != 0 or (mask & _RUTHLESS_HC_BIT) != 0
+        maps.append((f"{name} (NM HC)", done))
+    return maps
 
 
 # ── Achievement row widget ────────────────────────────────────────────────────
 
 class AchRow(QFrame):
     def __init__(self, name: str, desc: str, category: str, unlocked: bool,
-                 is_manual: bool = False, manual_checked: bool = False,
                  dot_color: str = "#3c3c3c", wiki_url: str = "",
-                 on_manual_change=None, parent=None, auto_unlocked: bool = False):
+                 parent=None, auto_unlocked: bool = False,
+                 tip: str = "", stacks: list[str] | None = None,
+                 meta_tag: str = ""):
         super().__init__(parent)
         self.name = name
         self.desc = desc
         self.category = category
         self.unlocked = unlocked
-        self.is_manual = is_manual
-        self.manual_checked = manual_checked
         self.auto_unlocked = auto_unlocked
         self._dot_color = dot_color
         self._wiki_url = wiki_url
-        self._on_change = on_manual_change
+        self._tip = tip
+        self._stacks = stacks or []
+        self._meta_tag = meta_tag
         self._build()
 
     def _build(self):
-        is_done = self.unlocked or (self.is_manual and (self.manual_checked or self.auto_unlocked))
+        is_done = self.unlocked or self.auto_unlocked
         self.setObjectName("card_done" if is_done else "card")
-        self.setFixedHeight(62)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Minimum)
         if self._wiki_url:
             self.setCursor(Qt.PointingHandCursor)
-            self.setToolTip("Click to open wiki page")
+            tooltip_parts = [self.desc]
+            if self._tip:
+                tooltip_parts.append(self._tip)
+            if self._stacks:
+                tooltip_parts.append("Stacks with: " + ", ".join(self._stacks))
+            self.setToolTip("\n\n".join(tooltip_parts))
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(
+            UI_PAD["card_h"], UI_PAD["card_v"], UI_PAD["card_h"], UI_PAD["card_v"],
+        )
         layout.setSpacing(12)
 
         accent = QFrame()
@@ -603,61 +1187,55 @@ class AchRow(QFrame):
         layout.addWidget(accent)
 
         dot = QLabel("●")
-        dot.setFixedWidth(16)
+        dot.setObjectName("ach_dot")
+        dot.setFixedWidth(UI_FONT["ach_dot"] + 6)
         dot.setAlignment(Qt.AlignCenter)
-        dot.setStyleSheet(
-            "color: #4ec94e; font-size: 16px; background: transparent; border: none;" if is_done
-            else f"color: {self._dot_color}; font-size: 16px; background: transparent; border: none;"
-        )
+        dot_color = "#4ec94e" if is_done else self._dot_color
+        dot.setStyleSheet(f"color: {dot_color}; background: transparent; border: none;")
         layout.addWidget(dot)
 
         text_col = QVBoxLayout()
-        text_col.setSpacing(2)
+        text_col.setSpacing(UI_PAD["row_gap"])
 
-        name_color = "#ffffff" if is_done else "#9d9d9d"
         name_lbl = QLabel(self.name)
-        name_lbl.setStyleSheet(
-            f"color: {name_color}; font-weight: bold; font-size: 13px; "
-            "background: transparent; border: none;"
-        )
+        name_lbl.setObjectName("ach_name_done" if is_done else "ach_name")
+        name_lbl.setWordWrap(True)
         text_col.addWidget(name_lbl)
 
         desc_lbl = QLabel(self.desc)
-        desc_lbl.setStyleSheet(
-            "color: #606060; font-size: 11px; background: transparent; border: none;"
-        )
-        desc_lbl.setWordWrap(False)
+        desc_lbl.setObjectName("ach_desc")
+        desc_lbl.setWordWrap(True)
         text_col.addWidget(desc_lbl)
+
+        if self._tip:
+            tip_lbl = QLabel(self._tip)
+            tip_lbl.setObjectName("ach_tip")
+            tip_lbl.setWordWrap(True)
+            text_col.addWidget(tip_lbl)
+
+        if self._stacks:
+            stack_lbl = QLabel("↳ Stacks with: " + ", ".join(self._stacks))
+            stack_lbl.setObjectName("ach_stack")
+            stack_lbl.setWordWrap(True)
+            text_col.addWidget(stack_lbl)
+
+        if self._meta_tag:
+            meta_lbl = QLabel(self._meta_tag)
+            meta_lbl.setObjectName("ach_meta_tag")
+            meta_lbl.setWordWrap(True)
+            text_col.addWidget(meta_lbl)
 
         layout.addLayout(text_col, stretch=1)
 
-        if self.is_manual:
-            if self.auto_unlocked:
-                badge = QLabel("✓ Save Verified")
-                badge.setStyleSheet(
-                    "color: #4ec94e; font-size: 11px; font-weight: bold; "
-                    "background: transparent; border: none;"
-                )
-                badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-                layout.addWidget(badge)
-            else:
-                cb = QCheckBox()
-                cb.setChecked(self.manual_checked)
-                cb.setToolTip("Mark as completed")
-                cb.toggled.connect(
-                    lambda checked, n=self.name: self._on_change and self._on_change(n, checked)
-                )
-                layout.addWidget(cb)
+        if self.auto_unlocked and not self.unlocked:
+            badge = QLabel("✓ Save Verified")
+            badge.setObjectName("ach_badge")
         else:
-            badge_text  = "✓ Unlocked" if self.unlocked else "Locked"
-            badge_color = "#4ec94e"    if self.unlocked else "#4a4a4a"
-            badge = QLabel(badge_text)
-            badge.setStyleSheet(
-                f"color: {badge_color}; font-size: 11px; font-weight: bold; "
-                "background: transparent; border: none;"
-            )
-            badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-            layout.addWidget(badge)
+            badge = QLabel("✓ Completed" if is_done else "Missing")
+            badge.setObjectName("ach_badge" if is_done else "ach_badge_warn")
+        badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        badge.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Preferred)
+        layout.addWidget(badge)
 
     def mousePressEvent(self, event):
         if self._wiki_url and event.button() == Qt.LeftButton:
@@ -668,26 +1246,29 @@ class AchRow(QFrame):
 # ── Meta achievement progress card ────────────────────────────────────────────
 
 class MetaCard(QFrame):
-    def __init__(self, title: str, color: str, total: int, parent=None):
+    def __init__(self, title: str, color: str, total: int, on_click=None, parent=None):
         super().__init__(parent)
         self._title = title
         self._color = color
         self._total = total
+        self._missing: list[str] = []
+        self._on_click = on_click
         self.setObjectName("meta_card")
-        self.setFixedHeight(76)
-        self.setMinimumWidth(145)
+        self.setSizePolicy(QSizePolicy.MinimumExpanding, QSizePolicy.Minimum)
+        self.setCursor(Qt.PointingHandCursor)
+        self.setToolTip(f"Click to jump to {title} section")
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
-        layout.setSpacing(3)
+        layout.setContentsMargins(10, UI_PAD["card_v"], 10, UI_PAD["card_v"])
+        layout.setSpacing(UI_PAD["row_gap"])
 
-        title_lbl = QLabel(title)
-        title_lbl.setWordWrap(True)
-        title_lbl.setStyleSheet(
-            f"color: {color}; font-weight: bold; font-size: 11px; "
-            "background: transparent; border: none;"
+        self._title_lbl = QLabel(title)
+        self._title_lbl.setObjectName("meta_title")
+        self._title_lbl.setWordWrap(True)
+        self._title_lbl.setStyleSheet(
+            f"color: {color}; background: transparent; border: none;"
         )
-        layout.addWidget(title_lbl)
+        layout.addWidget(self._title_lbl)
 
         if total > 0:
             self._bar = QProgressBar()
@@ -703,19 +1284,41 @@ class MetaCard(QFrame):
         else:
             self._bar = None
 
-        self._lbl = QLabel("Manual" if total == 0 else f"0 / {total}")
-        self._lbl.setStyleSheet(
-            "color: #808080; font-size: 11px; background: transparent; border: none;"
-        )
+        self._lbl = QLabel(f"0 / {total}" if total > 0 else "—")
+        self._lbl.setObjectName("meta_body")
         layout.addWidget(self._lbl)
 
-    def set_progress(self, done: int, is_complete: bool) -> None:
+        jump_hint = QLabel("↳ Click to jump")
+        jump_hint.setObjectName("meta_body")
+        jump_hint.setStyleSheet(
+            f"color: {color}; font-size: 12px; font-weight: bold; "
+            "background: transparent; border: none;"
+        )
+        layout.addWidget(jump_hint)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self._on_click:
+            self._on_click()
+        super().mousePressEvent(event)
+
+    def set_progress(self, done: int, is_complete: bool, missing: list[str] | None = None) -> None:
+        self._missing = missing or []
+        if self._missing:
+            preview = ", ".join(self._missing[:8])
+            if len(self._missing) > 8:
+                preview += f", … (+{len(self._missing) - 8} more)"
+            self.setToolTip(
+                f"Click to jump to {self._title}\n\n"
+                f"Missing ({len(self._missing)}):\n{preview}"
+            )
+        elif is_complete:
+            self.setToolTip(f"Click to jump to {self._title} — complete")
+        else:
+            self.setToolTip(f"Click to jump to {self._title} — {done} / {self._total} complete")
+
         if is_complete:
             self.setObjectName("meta_card_done")
-            self._lbl.setStyleSheet(
-                "color: #4ec94e; font-size: 11px; font-weight: bold; "
-                "background: transparent; border: none;"
-            )
+            self._lbl.setObjectName("meta_body_done")
             if self._bar:
                 self._bar.setValue(self._total)
                 self._lbl.setText(f"✓ {self._total} / {self._total}")
@@ -723,39 +1326,177 @@ class MetaCard(QFrame):
                 self._lbl.setText("✓ Done")
         else:
             self.setObjectName("meta_card")
-            self._lbl.setStyleSheet(
-                "color: #808080; font-size: 11px; background: transparent; border: none;"
-            )
+            self._lbl.setObjectName("meta_body")
             if self._bar:
                 self._bar.setValue(done)
-                self._lbl.setText(f"{done} / {self._total}")
+                missing_n = len(self._missing)
+                suffix = f" · {missing_n} left" if missing_n else ""
+                self._lbl.setText(f"{done} / {self._total}{suffix}")
             else:
-                self._lbl.setText("Manual")
-        self.setStyle(self.style())
+                self._lbl.setText(f"{done} / {self._total}" if self._total else "—")
+        _polish_widget(self._lbl)
+        _polish_widget(self)
+
+
+class MapTrackerPanel(QFrame):
+    """Expandable per-map progress list for Ruthless / Chromatic Defender sections."""
+
+    def __init__(
+        self,
+        section_key: str,
+        beaten_levels: dict[str, int],
+        filter_mode: str,
+        parent=None,
+    ):
+        super().__init__(parent)
+        self._section_key = section_key
+        self._beaten_levels = beaten_levels
+        self._filter_mode = filter_mode
+        self._expanded = False
+        self.setObjectName("card")
+        self._build()
+
+    def _all_maps(self) -> list[tuple[str, bool]]:
+        if self._section_key == "ruthless":
+            return ruthless_map_status(self._beaten_levels)
+        return chromatic_map_status(self._beaten_levels)
+
+    def _filtered_maps(self) -> list[tuple[str, bool]]:
+        maps = self._all_maps()
+        if self._filter_mode == "unlocked":
+            return [(name, done) for name, done in maps if done]
+        if self._filter_mode == "missing":
+            return [(name, done) for name, done in maps if not done]
+        return maps
+
+    def _section_label(self) -> str:
+        return "RUTHLESS HC" if self._section_key == "ruthless" else "CHROMATIC / NM HC"
+
+    def _expand_btn_id(self) -> str:
+        return (
+            "map_expand_btn_ruthless"
+            if self._section_key == "ruthless"
+            else "map_expand_btn_chromatic"
+        )
+
+    def _update_expand_label(self) -> None:
+        maps = self._filtered_maps()
+        total_all = len(self._all_maps())
+        done_all = sum(1 for _, done in self._all_maps() if done)
+        missing_all = total_all - done_all
+        label = self._section_label()
+
+        if self._expanded:
+            text = f"▲  COLLAPSE {label} MAP LIST  ▲"
+        elif self._filter_mode == "missing":
+            text = f"▼  EXPAND — SHOW {len(maps)} MISSING {label} MAPS  ▼"
+        elif self._filter_mode == "unlocked":
+            text = f"▼  EXPAND — SHOW {len(maps)} COMPLETED {label} MAPS  ▼"
+        else:
+            text = (
+                f"▼  EXPAND — SHOW ALL {total_all} {label} MAPS "
+                f"({done_all} done · {missing_all} missing)  ▼"
+            )
+        self._expand_btn.setText(text)
+
+    def _build(self) -> None:
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 4, 0, 8)
+        layout.setSpacing(6)
+
+        self._expand_btn = QPushButton()
+        self._expand_btn.setObjectName(self._expand_btn_id())
+        self._expand_btn.clicked.connect(self._toggle)
+        self._update_expand_label()
+        layout.addWidget(self._expand_btn)
+
+        self._content = QFrame()
+        self._content.setVisible(False)
+        content_layout = QVBoxLayout(self._content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(4)
+
+        maps = self._filtered_maps()
+        if maps:
+            for name, done in maps:
+                content_layout.addWidget(self._make_map_row(name, done))
+        else:
+            empty = QLabel("No maps match the current filter.")
+            empty.setObjectName("section_blurb")
+            empty.setWordWrap(True)
+            content_layout.addWidget(empty)
+
+        layout.addWidget(self._content)
+
+    def _make_map_row(self, name: str, done: bool) -> QFrame:
+        row = QFrame()
+        row.setObjectName("map_row_done" if done else "map_row_missing")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(12, 8, 12, 8)
+        row_layout.setSpacing(10)
+
+        dot = QLabel("●")
+        dot.setFixedWidth(UI_FONT["ach_dot"] + 6)
+        dot.setAlignment(Qt.AlignCenter)
+        dot.setStyleSheet(
+            f"color: {'#4ec94e' if done else '#f48771'}; background: transparent; border: none;"
+        )
+        row_layout.addWidget(dot)
+
+        name_lbl = QLabel(name)
+        name_lbl.setObjectName("map_row_name_done" if done else "map_row_name_missing")
+        name_lbl.setWordWrap(True)
+        row_layout.addWidget(name_lbl, stretch=1)
+
+        badge = QLabel("✓ Done" if done else "Missing")
+        badge.setObjectName("ach_badge" if done else "ach_badge_warn")
+        badge.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        row_layout.addWidget(badge)
+        return row
+
+    def _toggle(self) -> None:
+        self._expanded = not self._expanded
+        self._content.setVisible(self._expanded)
+        self._update_expand_label()
+
+
+def _meta_group_key(name: str) -> str:
+    return _META_GROUP_FOR.get(name, "other")
+
+
+def _meta_group_title(key: str) -> str:
+    return _META_GROUP_TITLE.get(key, "Other")
+
+
+def _chiku_section_key(name: str) -> str:
+    return _CHIKU_SECTION_FOR.get(name, "extras")
 
 
 # ── Main window ───────────────────────────────────────────────────────────────
 
-class AchievementTracker(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("DD1 Achievement Tracker")
-        self.resize(920, 760)
+class AchievementTrackerWidget(QWidget):
+    def __init__(self, parent=None, dun_path=None, ini_path=None):
+        super().__init__(parent)
 
-        self._dun_path     = DUN_FILE
-        self._ini_path     = _DEFAULT_INI
+        _raw_manual = _load_manual(_MANUAL_JSON)
+        self._manual_state, self._ui_settings = _split_manual_state(_raw_manual)
+        self._sort_mode = self._ui_settings.get("sort_mode", "chiku")
+        if self._sort_mode not in _SORT_MODES:
+            self._sort_mode = "chiku"
+
+        self._dun_path, self._ini_path = _resolve_save_paths(
+            dun_path, ini_path, self._ui_settings,
+        )
         self._unlocked:    set[str] = set()
-        self._manual_state: dict    = _load_manual(_MANUAL_JSON)
         self._filter_mode  = "all"
         self._rows: list[AchRow]    = []
         self._beaten_levels: dict[str, int] = {}
+        self._section_anchors: dict[str, QWidget] = {}
+        self._pending_scroll_key: str | None = None
 
-        root = QWidget()
-        root.setObjectName("root")
-        self.setCentralWidget(root)
-        main_layout = QVBoxLayout(root)
-        main_layout.setContentsMargins(16, 14, 16, 14)
-        main_layout.setSpacing(8)
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(16, 10, 16, 10)
+        main_layout.setSpacing(5)
 
         top = QHBoxLayout()
         title = QLabel("DD1 Achievement Tracker")
@@ -768,37 +1509,76 @@ class AchievementTracker(QMainWindow):
         main_layout.addLayout(top)
 
         file_row = QHBoxLayout()
-        self._path_lbl = QLabel(self._dun_path)
-        self._path_lbl.setStyleSheet("color: #808080; font-size: 11px;")
-        self._path_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._path_lbl = QLabel("")
+        self._path_lbl.setObjectName("path_lbl")
+        self._path_lbl.setWordWrap(True)
+        self._path_lbl.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         file_row.addWidget(self._path_lbl)
-        browse_btn = QPushButton("Browse…")
-        browse_btn.setObjectName("browse_btn")
-        browse_btn.clicked.connect(self._browse)
-        file_row.addWidget(browse_btn)
-        reload_btn = QPushButton("Reload")
-        reload_btn.clicked.connect(self._load)
-        file_row.addWidget(reload_btn)
+        self._browse_btn = QPushButton("Browse…")
+        self._browse_btn.setObjectName("browse_btn")
+        self._browse_btn.clicked.connect(self._browse)
+        file_row.addWidget(self._browse_btn)
+        self._reload_btn = QPushButton("Reload")
+        self._reload_btn.clicked.connect(self._load)
+        file_row.addWidget(self._reload_btn)
         main_layout.addLayout(file_row)
 
         self._status_lbl = QLabel("")
         self._status_lbl.setObjectName("status_ok")
+        self._status_lbl.setWordWrap(True)
         main_layout.addWidget(self._status_lbl)
 
         meta_row = QHBoxLayout()
         meta_row.setSpacing(6)
         self._meta_cards: list[MetaCard] = []
+        _meta_totals = {
+            "Legendary Defender": len(_LEGENDARY_REQS),
+            "Ultimate Defender": len(_ULTIMATE_REQS),
+            "Eternal Defender": len(_ETERNAL_REQS),
+            "Ruthless Defender": len(RUTHLESS_CAMPAIGN_MAPS) + len(RUTHLESS_CHALLENGE_MAPS),
+            "Chromatic Defender": len(CHROMATIC_MAPS),
+        }
         for title_m, _sid, reqs, color in META_DEFS:
-            card = MetaCard(title_m, color, len(reqs))
+            total = _meta_totals.get(title_m, len(reqs))
+            sec_key = _META_SECTION_KEYS[title_m]
+            card = MetaCard(
+                title_m, color, total,
+                on_click=lambda k=sec_key: self._jump_to_meta_section(k),
+            )
             meta_row.addWidget(card)
             self._meta_cards.append(card)
         main_layout.addLayout(meta_row)
 
+        sort_row = QHBoxLayout()
+        sort_row.setSpacing(6)
+        sort_lbl = QLabel("Sort:")
+        sort_lbl.setObjectName("hint_lbl")
+        sort_row.addWidget(sort_lbl)
+        self._sort_grp = QButtonGroup(self)
+        self._sort_grp.setExclusive(True)
+        for label, mode in [
+            ("Chiku Guide", "chiku"),
+            ("Meta Path", "meta"),
+            ("Default", "default"),
+        ]:
+            btn = QPushButton(label)
+            btn.setObjectName("sort_btn")
+            btn.setCheckable(True)
+            btn.setChecked(mode == self._sort_mode)
+            btn.clicked.connect(lambda _checked, m=mode: self._set_sort_mode(m))
+            self._sort_grp.addButton(btn)
+            sort_row.addWidget(btn)
+        sort_row.addStretch()
+        main_layout.addLayout(sort_row)
+
         fs_row = QHBoxLayout()
         fs_row.setSpacing(6)
+        filter_lbl = QLabel("Filter:")
+        filter_lbl.setObjectName("hint_lbl")
+        fs_row.addWidget(filter_lbl)
         self._filter_grp = QButtonGroup(self)
         self._filter_grp.setExclusive(True)
-        for label, mode in [("All", "all"), ("Unlocked", "unlocked"), ("Missing", "missing")]:
+        for label, mode in [("All", "all"), ("Completed", "unlocked"), ("Missing", "missing")]:
             btn = QPushButton(label)
             btn.setObjectName("filter_btn")
             btn.setCheckable(True)
@@ -828,25 +1608,78 @@ class AchievementTracker(QMainWindow):
         main_layout.addWidget(self._scroll, stretch=1)
 
         self.setStyleSheet(STYLESHEET)
+        self._apply_ui_metrics()
+        self._update_path_label()
         QTimer.singleShot(0, self._load)
 
+    def _update_path_label(self) -> None:
+        self._path_lbl.setText(self._dun_path or "No save file selected")
+
+    def _persist_save_paths(self) -> None:
+        self._ui_settings["dun_path"] = self._dun_path
+        self._ui_settings["ini_path"] = self._ini_path
+        _save_manual(_MANUAL_JSON, self._manual_state, self._ui_settings)
+
+    def _apply_ui_metrics(self) -> None:
+        """Re-fit buttons after stylesheet is applied — safe to call after font changes."""
+        for btn in self._sort_grp.buttons():
+            _fit_toggle_button(btn)
+        for btn in self._filter_grp.buttons():
+            _fit_toggle_button(btn)
+        _fit_action_button(self._browse_btn)
+        _fit_action_button(self._reload_btn)
+
+
+    def _jump_to_meta_section(self, section_key: str) -> None:
+        if self._sort_mode != "meta":
+            self._sort_mode = "meta"
+            self._ui_settings["sort_mode"] = "meta"
+            _save_manual(_MANUAL_JSON, self._manual_state, self._ui_settings)
+            for btn in self._sort_grp.buttons():
+                btn.setChecked(btn.text() == "Meta Path")
+        self._pending_scroll_key = section_key
+        self._rebuild_list()
+
+    def _scroll_to_section(self, section_key: str) -> None:
+        widget = self._section_anchors.get(section_key)
+        if widget:
+            self._scroll.ensureWidgetVisible(widget, 80, 80)
+
     def _load(self):
+        if not self._dun_path or not os.path.isfile(self._dun_path):
+            self._unlocked = set()
+            self._beaten_levels = {}
+            self._status_lbl.setObjectName("hint_lbl")
+            self._status_lbl.setText(
+                "No save loaded — click Browse… to select DunDefHeroes.dun"
+            )
+            self._status_lbl.setStyle(self._status_lbl.style())
+            self._update_meta_cards()
+            self._rebuild_list()
+            return
+
+        if not self._ini_path or not os.path.isfile(self._ini_path):
+            self._unlocked = set()
+            self._beaten_levels = {}
+            self._status_lbl.setObjectName("status_err")
+            self._status_lbl.setText(
+                "Could not find UDKEngineSteamworks.ini next to this install "
+                "(expected under UDKGame/Config/)"
+            )
+            self._status_lbl.setStyle(self._status_lbl.style())
+            self._update_meta_cards()
+            self._rebuild_list()
+            return
+
         self._status_lbl.setObjectName("status_ok")
-        import dun_parser
-        print("\n--- Diagnostic Info ---", flush=True)
-        print(f"Loading save file: {self._dun_path}", flush=True)
-        print(f"Using INI file: {self._ini_path}", flush=True)
-        print(f"dun_parser module path: {getattr(dun_parser, '__file__', 'unknown')}", flush=True)
         try:
             self._unlocked = get_unlocked_steam_ids(self._dun_path, self._ini_path)
             self._beaten_levels = get_savefile_beaten_levels(self._dun_path)
             self._status_lbl.setText(
                 f"Loaded — {len(self._unlocked)} Steam achievements / {len(self._beaten_levels)} level completions verified"
             )
-            print(f"Successfully loaded and parsed achievements! Unlocked: {len(self._unlocked)}, Level completions: {len(self._beaten_levels)}", flush=True)
         except Exception as e:
             import traceback
-            print(f"\n[ERROR] Failed to load achievements!", file=sys.stderr, flush=True)
             traceback.print_exc()
             self._unlocked = set()
             self._beaten_levels = {}
@@ -857,54 +1690,196 @@ class AchievementTracker(QMainWindow):
         self._rebuild_list()
 
     def _browse(self):
+        start_dir = os.path.dirname(self._dun_path)
+        if not start_dir or not os.path.isdir(start_dir):
+            start_dir = os.path.expanduser("~")
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select DunDefHeroes.dun", os.path.dirname(self._dun_path),
+            self, "Select DunDefHeroes.dun", start_dir,
             "DUN Files (*.dun);;All Files (*)"
         )
         if path:
             self._dun_path = path
-            self._path_lbl.setText(path)
+            self._ini_path = _ini_path_for_dun(path)
+            self._persist_save_paths()
+            self._update_path_label()
             self._load()
 
     def _set_filter(self, mode: str) -> None:
         self._filter_mode = mode
         self._rebuild_list()
 
-    def _on_manual_change(self, name: str, checked: bool) -> None:
-        self._manual_state[name] = checked
-        _save_manual(_MANUAL_JSON, self._manual_state)
-        self._update_meta_cards()
+    def _set_sort_mode(self, mode: str) -> None:
+        if mode not in _SORT_MODES:
+            return
+        self._sort_mode = mode
+        self._ui_settings["sort_mode"] = mode
+        _save_manual(_MANUAL_JSON, self._manual_state, self._ui_settings)
         self._rebuild_list()
+
+    def _is_done(self, name: str, steam_id: str | None) -> tuple[bool, bool, bool]:
+        """Return (is_done, unlocked_steam, auto_unlocked_manual)."""
+        unlocked = (steam_id in self._unlocked) if steam_id else False
+        auto_unlocked = False
+        if steam_id is None:
+            if name == "Ruthless Defender":
+                auto_unlocked = check_ruthless_defender(self._beaten_levels)
+            elif name == "Chromatic Defender":
+                auto_unlocked = check_chromatic_defender(self._beaten_levels)
+        is_done = unlocked or auto_unlocked
+        return is_done, unlocked, auto_unlocked
 
     def _update_meta_cards(self) -> None:
         for card, (_title, self_sid, reqs, _color) in zip(self._meta_cards, META_DEFS):
-            if not reqs:
-                auto_unlocked = False
-                if _title == "Ruthless Defender":
-                    auto_unlocked = check_ruthless_defender(self._beaten_levels)
-                elif _title == "Chromatic Defender":
-                    auto_unlocked = check_chromatic_defender(self._beaten_levels)
-                is_done = self._manual_state.get(_title, False) or auto_unlocked
-                card.set_progress(0, is_done)
-            else:
-                done = sum(
-                    1 for name in reqs
-                    if (
-                        (_NAME_TO_STEAMID.get(name) in self._unlocked)
-                        if _NAME_TO_STEAMID.get(name)
-                        else (
-                            self._manual_state.get(name, False)
-                            or (name == "Ruthless Defender" and check_ruthless_defender(self._beaten_levels))
-                            or (name == "Chromatic Defender" and check_chromatic_defender(self._beaten_levels))
-                        )
-                    )
+            if _title == "Ruthless Defender":
+                maps = ruthless_map_status(self._beaten_levels)
+                missing = [name for name, done in maps if not done]
+                done = sum(1 for _, d in maps if d)
+                challenges_done = sum(
+                    1 for tag, _ in RUTHLESS_CHALLENGE_MAPS
+                    if _map_done_on_bit(self._beaten_levels, tag, _RUTHLESS_HC_BIT)
                 )
-                manual_override = self._manual_state.get(_title, False)
+                campaign_done = sum(
+                    1 for tag, _ in RUTHLESS_CAMPAIGN_MAPS
+                    if _map_done_on_bit(self._beaten_levels, tag, _RUTHLESS_HC_BIT)
+                )
+                is_done = (campaign_done == len(RUTHLESS_CAMPAIGN_MAPS)) and (challenges_done >= 12)
+                if is_done:
+                    missing = []
+                card.set_progress(done, is_done, missing)
+            elif _title == "Chromatic Defender":
+                maps = chromatic_map_status(self._beaten_levels)
+                missing = [name for name, done in maps if not done]
+                done = sum(1 for name, d in maps if d and not name.startswith("Prerequisite"))
+                is_done = check_chromatic_defender(self._beaten_levels)
+                if is_done:
+                    missing = []
+                card.set_progress(done, is_done, missing)
+            else:
+                missing = []
+                done = 0
+                for req_name in reqs:
+                    req_sid = _NAME_TO_STEAMID.get(req_name)
+                    req_done, _, _ = self._is_done(req_name, req_sid)
+                    if req_done:
+                        done += 1
+                    else:
+                        missing.append(req_name)
                 if self_sid:
                     is_done = self_sid in self._unlocked
                 else:
-                    is_done = manual_override or (done >= len(reqs))
-                card.set_progress(done, is_done)
+                    is_done = done >= len(reqs)
+                if is_done:
+                    missing = []
+                card.set_progress(done, is_done, missing)
+
+    def _insert_section_block(self, header_key: str, title: str, blurb: str, suffix: str) -> None:
+        hdr = QLabel(f"{title.upper()}{suffix}")
+        hdr.setObjectName("section_header")
+        hdr.setWordWrap(True)
+        hdr.setContentsMargins(4, 10, 0, 0)
+        if blurb:
+            hdr.setToolTip(blurb)
+        self._list_layout.insertWidget(self._list_layout.count() - 1, hdr)
+        self._section_anchors[header_key] = hdr
+        if blurb and self._sort_mode in ("chiku", "meta"):
+            blurb_lbl = QLabel(blurb)
+            blurb_lbl.setObjectName("section_blurb")
+            blurb_lbl.setWordWrap(True)
+            blurb_lbl.setContentsMargins(4, 0, 8, 4)
+            self._list_layout.insertWidget(self._list_layout.count() - 1, blurb_lbl)
+        if header_key in ("ruthless", "chromatic") and self._sort_mode in ("chiku", "meta"):
+            panel = MapTrackerPanel(
+                header_key,
+                self._beaten_levels,
+                self._filter_mode,
+                parent=self._list_widget,
+            )
+            self._list_layout.insertWidget(self._list_layout.count() - 1, panel)
+
+    def _section_key_for(self, name: str, category: str) -> str:
+        if self._sort_mode == "default":
+            return category
+        if self._sort_mode == "chiku":
+            return _chiku_section_key(name)
+        return _meta_group_key(name)
+
+    def _header_for_section(self, section_key: str) -> tuple[str, str, str]:
+        if self._sort_mode == "default":
+            return (section_key.upper(), "", "")
+        if self._sort_mode == "chiku":
+            title, blurb = _CHIKU_SECTION_LOOKUP.get(section_key, ("Other", ""))
+            members = CHIKU_SECTION_MEMBERS.get(section_key, [])
+            if members:
+                done = sum(
+                    1 for m in members
+                    if self._is_done(m, _NAME_TO_STEAMID.get(m))[0]
+                )
+                suffix = f" — {done}/{len(members)} done"
+            else:
+                suffix = ""
+            return (title, blurb, suffix)
+        title = _meta_group_title(section_key)
+        blurb = {
+            "legendary": "Base game — 56 Steam achievements for Legendary Defender.",
+            "ultimate": "Eternia Shards DLC — required after Legendary for Ultimate Defender.",
+            "eternal": "CDT Lost Quests on Nightmare — after Ultimate Defender.",
+            "ruthless": "Original campaign + challenges on Ruthless HC (save file verified).",
+            "chromatic": "DDT endgame — after Ruthless Defender (save file verified).",
+            "other": "Seasonal/DLC extras not required for core meta path.",
+        }.get(section_key, "")
+        group_members = next((g[2] for g in META_SORT_GROUPS if g[0] == section_key), set())
+        if group_members:
+            done = sum(
+                1 for m in group_members
+                if self._is_done(m, _NAME_TO_STEAMID.get(m))[0]
+            )
+            suffix = f" — {done}/{len(group_members)} done"
+        elif section_key == "other":
+            other_names = [
+                row[0] for row in ACHIEVEMENTS
+                if _meta_group_key(row[0]) == "other"
+            ]
+            done = sum(
+                1 for m in other_names
+                if self._is_done(m, _NAME_TO_STEAMID.get(m))[0]
+            )
+            suffix = f" — {done}/{len(other_names)} done"
+        else:
+            suffix = ""
+        return (title, blurb, suffix)
+
+    def _add_entry_row(
+        self,
+        name: str,
+        desc: str,
+        cat: str,
+        unlocked: bool,
+        auto_unlocked: bool,
+    ) -> None:
+        tip = ACH_TIPS.get(name, "")
+        stacks = ACH_STACKS_WITH.get(name, [])
+        if self._filter_mode == "missing":
+            stacks = [
+                s for s in stacks
+                if not self._is_done(s, _NAME_TO_STEAMID.get(s))[0]
+            ]
+        meta_tag = ""
+        if self._sort_mode != "meta":
+            gkey = _meta_group_key(name)
+            if gkey != "other":
+                meta_tag = f"Meta: {_meta_group_title(gkey)}"
+
+        row = AchRow(
+            name, desc, cat, unlocked,
+            dot_color=_ACH_META_COLOR.get(name, "#3c3c3c"),
+            wiki_url=_wiki_url(name),
+            auto_unlocked=auto_unlocked,
+            tip=tip,
+            stacks=stacks,
+            meta_tag=meta_tag,
+        )
+        self._list_layout.insertWidget(self._list_layout.count() - 1, row)
+        self._rows.append(row)
 
     def _rebuild_list(self) -> None:
         while self._list_layout.count() > 1:
@@ -913,70 +1888,135 @@ class AchievementTracker(QMainWindow):
                 item.widget().deleteLater()
 
         self._rows = []
+        self._section_anchors = {}
         query = self._search.text().lower().strip()
-        current_cat = None
 
+        entries: list[tuple] = []
         for name, desc, cat, steam_id in ACHIEVEMENTS:
-            is_manual      = (steam_id is None)
-            unlocked       = (steam_id in self._unlocked) if steam_id else False
-            manual_checked = self._manual_state.get(name, False) if is_manual else False
-            
-            auto_unlocked = False
-            if is_manual:
-                if name == "Ruthless Defender":
-                    auto_unlocked = check_ruthless_defender(self._beaten_levels)
-                elif name == "Chromatic Defender":
-                    auto_unlocked = check_chromatic_defender(self._beaten_levels)
-            
-            is_done        = unlocked or manual_checked or auto_unlocked
-
+            is_done, unlocked, auto_unlocked = self._is_done(name, steam_id)
             if self._filter_mode == "unlocked" and not is_done:
                 continue
-            if self._filter_mode == "missing"  and is_done:
+            if self._filter_mode == "missing" and is_done:
                 continue
-
             if query and (
                 query not in name.lower()
                 and query not in desc.lower()
                 and query not in cat.lower()
+                and query not in ACH_TIPS.get(name, "").lower()
             ):
                 continue
+            entries.append((name, desc, cat, steam_id, is_done, unlocked, auto_unlocked))
 
-            if cat != current_cat:
-                current_cat = cat
-                hdr = QLabel(cat.upper())
-                hdr.setObjectName("section_header")
-                hdr.setContentsMargins(4, 8, 0, 2)
-                self._list_layout.insertWidget(self._list_layout.count() - 1, hdr)
+        def _row_sort_key(entry):
+            name = entry[0]
+            if self._sort_mode == "chiku":
+                sec = _chiku_section_key(name)
+                sec_order = next(
+                    (i for i, (k, _, _) in enumerate(CHIKU_SECTIONS) if k == sec),
+                    len(CHIKU_SECTIONS),
+                )
+                return (sec_order, _CHIKU_SORT_INDEX.get(name, 10_000), name)
+            if self._sort_mode == "meta":
+                group_order = [g[0] for g in META_SORT_GROUPS]
+                gkey = _meta_group_key(name)
+                gidx = group_order.index(gkey) if gkey in group_order else len(group_order)
+                return (gidx, _CHIKU_SORT_INDEX.get(name, 10_000), name)
+            return (_ACH_DEFAULT_INDEX.get(name, 10_000),)
 
-            row = AchRow(
-                name, desc, cat, unlocked, is_manual, manual_checked,
-                dot_color=_ACH_META_COLOR.get(name, "#3c3c3c"),
-                wiki_url=_wiki_url(name),
-                on_manual_change=self._on_manual_change,
-                auto_unlocked=auto_unlocked
-            )
-            self._list_layout.insertWidget(self._list_layout.count() - 1, row)
-            self._rows.append(row)
+        entries.sort(key=_row_sort_key)
 
-        steam_total  = sum(1 for *_, sid in ACHIEVEMENTS if sid)
-        manual_total = sum(1 for r in ACHIEVEMENTS if not r[3])
-        manual_done  = sum(
-            1 for r in ACHIEVEMENTS if not r[3] and (
-                self._manual_state.get(r[0], False)
-                or (r[0] == "Ruthless Defender" and check_ruthless_defender(self._beaten_levels))
-                or (r[0] == "Chromatic Defender" and check_chromatic_defender(self._beaten_levels))
-            )
-        )
+        scroll_target = self._pending_scroll_key
+
+        if self._sort_mode in ("chiku", "meta"):
+            grouped: dict[str, list[tuple]] = {}
+            for entry in entries:
+                grouped.setdefault(self._section_key_for(entry[0], entry[2]), []).append(entry)
+            for force_key in ("ruthless", "chromatic"):
+                grouped.setdefault(force_key, [])
+            if scroll_target:
+                grouped.setdefault(scroll_target, [])
+
+            if self._sort_mode == "chiku":
+                section_order = [k for k, _, _ in CHIKU_SECTIONS]
+            else:
+                section_order = [g[0] for g in META_SORT_GROUPS]
+
+            for section_key in section_order:
+                section_entries = grouped.get(section_key, [])
+                if (
+                    not section_entries
+                    and section_key not in ("ruthless", "chromatic")
+                    and section_key != scroll_target
+                ):
+                    continue
+                h_title, h_blurb, h_suffix = self._header_for_section(section_key)
+                self._insert_section_block(section_key, h_title, h_blurb, h_suffix)
+                for name, desc, cat, _steam_id, _is_done, unlocked, auto_unlocked in section_entries:
+                    self._add_entry_row(name, desc, cat, unlocked, auto_unlocked)
+        else:
+            current_section = None
+            for name, desc, cat, steam_id, is_done, unlocked, auto_unlocked in entries:
+                section_key = cat
+                if section_key != current_section:
+                    current_section = section_key
+                    self._insert_section_block(section_key, cat.upper(), "", "")
+                self._add_entry_row(name, desc, cat, unlocked, auto_unlocked)
+
+        steam_total = sum(1 for *_, sid in ACHIEVEMENTS if sid)
+        total_done = sum(1 for r in ACHIEVEMENTS if self._is_done(r[0], r[3])[0])
+        missing_steam = steam_total - len(self._unlocked)
         self._counter_lbl.setText(
-            f"{len(self._unlocked)} / {steam_total} Steam  ·  {manual_done} / {manual_total} Manual"
+            f"{total_done} / {len(ACHIEVEMENTS)} total"
+            f"  ·  {len(self._unlocked)} / {steam_total} Steam ({missing_steam} left)"
         )
+
+        if self._pending_scroll_key:
+            scroll_key = self._pending_scroll_key
+            self._pending_scroll_key = None
+            QTimer.singleShot(50, lambda k=scroll_key: self._scroll_to_section(k))
+
+
+class AchievementTracker(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("DD1 Achievement Tracker")
+        self.resize(920, 760)
+        self._widget = AchievementTrackerWidget(self)
+        self.setCentralWidget(self._widget)
+
+
+def check_single_instance(name: str):
+    from PySide6.QtNetwork import QLocalSocket, QLocalServer
+    from PySide6.QtWidgets import QMessageBox
+    
+    socket = QLocalSocket()
+    socket.connectToServer(name)
+    if socket.waitForConnected(500):
+        socket.close()
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Warning)
+        msg.setWindowTitle("Already Running")
+        msg.setText("Another instance of the DD1 Achievement Tracker is already running.")
+        msg.exec()
+        sys.exit(0)
+        
+    QLocalServer.removeServer(name)
+    server = QLocalServer()
+    if not server.listen(name):
+        sys.exit(1)
+    return server
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
-if __name__ == "__main__":
+
+def main() -> None:
     app = QApplication(sys.argv)
     app.setStyle("Fusion")
+    check_single_instance("dd1_achievement_tracker_lock")
     win = AchievementTracker()
     win.show()
     sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()

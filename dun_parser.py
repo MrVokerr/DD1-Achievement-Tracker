@@ -20,46 +20,14 @@ MAX_FEATURE_SLOTS   = 10
 
 VERBOSE = "--verbose" in sys.argv or "-v" in sys.argv
 
-# ── Auto-detect paths ─────────────────────────────────────────────────────────
-_DUN_FILENAME = "DunDefHeroes.dun"
-_INI_FILENAME = "UDKEngineSteamworks.ini"
+# ── Auto-detect paths (shared with Gear Optimizer / Profit Bot) ───────────────
+_REPO_ROOT = os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
+from dd_paths import find_dun_file, find_ini_file  # noqa: E402
 
-# Common Steam library roots to search (tries every drive A-G and common paths)
-_STEAM_ROOTS = [
-    r"C:\Program Files (x86)\Steam\steamapps\common\Dungeon Defenders",
-    r"C:\Program Files\Steam\steamapps\common\Dungeon Defenders",
-    r"D:\Steam\steamapps\common\Dungeon Defenders",
-    r"D:\SteamLibrary\steamapps\common\Dungeon Defenders",
-    r"E:\Steam\steamapps\common\Dungeon Defenders",
-    r"E:\SteamLibrary\steamapps\common\Dungeon Defenders",
-    r"F:\Games\steamapps\common\Dungeon Defenders",
-    r"F:\Steam\steamapps\common\Dungeon Defenders",
-    r"F:\SteamLibrary\steamapps\common\Dungeon Defenders",
-    r"G:\Steam\steamapps\common\Dungeon Defenders",
-    r"G:\SteamLibrary\steamapps\common\Dungeon Defenders",
-]
-
-def _find_dun() -> str:
-    candidates = []
-    for root in _STEAM_ROOTS:
-        for sub in ("Win32", "Win64"):
-            p = os.path.join(root, "Binaries", sub, _DUN_FILENAME)
-            if os.path.exists(p):
-                candidates.append(p)
-    if candidates:
-        return max(candidates, key=os.path.getmtime)
-    # Return a plausible placeholder so the UI can display it
-    return os.path.join(_STEAM_ROOTS[0], "Binaries", "Win32", _DUN_FILENAME)
-
-def _find_ini() -> str:
-    for root in _STEAM_ROOTS:
-        p = os.path.join(root, "UDKGame", "Config", _INI_FILENAME)
-        if os.path.exists(p):
-            return p
-    return os.path.join(_STEAM_ROOTS[0], "UDKGame", "Config", _INI_FILENAME)
-
-DUN_FILE    = _find_dun()
-DEFAULT_INI = _find_ini()
+DUN_FILE = find_dun_file()
+DEFAULT_INI = find_ini_file()
 
 # ── BinaryReader ──────────────────────────────────────────────────────────────
 
