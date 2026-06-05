@@ -363,33 +363,58 @@ _META_SECTION_KEYS = {
 }
 
 RUTHLESS_CAMPAIGN_MAPS: list[tuple[str, str]] = [
-    ("CAMPDW", "The Deeper Well"), ("CAMPFF", "Foundry Forger"), ("CAMPAL", "Alchemical Laboratory"),
-    ("CAMPMQ", "Magus Quarters"), ("CAMPSQ", "Servants Quarters"), ("CAMPCA", "Castle Armory"),
+    ("CAMPDW", "The Deeper Well"), ("CAMPFF", "Foundries and Forges"), ("CAMPMQ", "Magus Quarters"),
+    ("CAMPAL", "Alchemical Laboratory"), ("CAMPSQ", "Servants Quarters"), ("CAMPCA", "Castle Armory"),
     ("CAMPHC", "Hall of Court"), ("CAMPTR", "The Throne Room"), ("CAMPRG", "Royal Gardens"),
-    ("CAMPRP", "Ramparts"), ("CAMPES", "Endless Spires"), ("CAMPTS", "The Summit"),
+    ("CAMPRP", "The Ramparts"), ("CAMPES", "Endless Spires"), ("CAMPTS", "The Summit"),
     ("CAMPGC", "Glitterhelm Caverns"),
 ]
+# Vanilla challenge tags from DefaultDunDef.ini (SPECAL=Raining Goblins, SPECTR=Chicken, etc.)
 RUTHLESS_CHALLENGE_MAPS: list[tuple[str, str]] = [
-    ("SPECDW", "No Towers Allowed"), ("SPECFF", "Unlikely Allies"), ("WARPP1", "Warping Core"),
-    ("SPECHW", "Halloween Spooktacular"), ("SPECMQ", "Magus Quarters Challenge"), ("SPECOA", "Ogre Crush"),
-    ("SPECAL", "Wizardry"), ("SPECSQ", "Zippy Terror"), ("SPECCA", "Spooktacular Bay"),
-    ("SPECHC", "Chicken"), ("SPECTR", "Moving Core"), ("SPECRG", "Death From Above"),
-    ("SPECTH", "Treasure Hunt"),
+    ("SPECDW", "No Towers Allowed"), ("SPECFF", "Unlikely Allies"), ("SPECMQ", "Warping Core"),
+    ("SPECAL", "Raining Goblins"), ("SPECSQ", "Wizardry"), ("SPECCA", "Ogre Crush"),
+    ("SPECHC", "Zippy Terror"), ("SPECTR", "Chicken"), ("SPECRG", "Moving Core"),
+    ("SPECRP", "Death From Above"), ("SPECES", "Assault"), ("SPECTS", "Treasure Hunt"),
+    ("SPECGC", "Monster Fest"),
 ]
+# Lost Quests tab + challenge tab maps for Chromatic Defender (Guides/wiki_clean/Chromatic Defender.md)
 CHROMATIC_MAPS: list[tuple[str, str]] = [
-    ("SPECCA", "Spooktacular Bay"),
-    ("SPECHW", "Halloween Spooktacular"),
-    ("LHOLOC", "Lifestream Hollow"),
-    ("VDAY03", "Lover's Paradise"),
-    ("RETMIS", "Mistymire Forest"),
-    ("RETMOR", "Moraggo Desert Town"),
-    ("RETAQU", "Aquanos"),
-    ("RETSKY", "Sky City"),
-    ("RETCRD", "Crystalline Dimension"),
-    ("CDTARA", "Scorched Arabia"),
-    ("CDTTWC", "Warping Core II"),
-    ("SPECGC", "Boss Rush II"),
+    ("LHOLOC", "Spooktacular Bay"),
+    ("CDHUNT", "Challenge: Halloween Invasion"),
+    ("VDAY04", "The Striking Tree"),
+    ("CAMPHP", "Challenge: Tavern Incursion"),
+    ("SPECTI", "Lover's Paradise"),
+    ("VDAY03", "Crystal Escort: Wandering Heart"),
+    ("LIFHOL", "Lifestream Hollow"),
+    ("WRPAR", "Challenge: Forest Ogre Crush"),
+    ("TROPI0D", "Tropics of Etheria"),
+    ("CDCAVE", "Crystal Cave"),
+    ("NTACC", "No Towers Allowed: Crystal Cave"),
+    ("WWEHE", "Challenge: Eternia Gauntlet"),
+    ("CDTSBB", "Frostdale Wonderland"),
+    ("CDTTWC", "Challenge: The Love Machine"),
+    ("CAMPTL", "Tinkerer's Workshop"),
+    ("CDTTWA", "Challenge: Workshop Assault"),
+    ("SKYSPK", "Sky Spooktacular"),
+    ("DTSIL", "Frostdale Royal Court"),
+    ("CDTARC", "Challenge: Scorched Arabia"),
+    ("WRPARC", "Warping Core Challenge Pack 2: Part 1"),
+    ("CDTAQA", "Warping Core Challenge Pack 2: Part 2"),
+    ("WRPOMN", "Warping Core Challenge Pack 2: Part 3"),
+    ("JSTSPK", "Jester's Spooktacular"),
+    ("MAGUSV", "Valentine Citadel"),
+    ("RETMIS", "Return to Mistymire"),
+    ("RETMOR", "Return to Moraggo"),
+    ("RETAQU", "Return to Aquanos"),
+    ("RETSKY", "Return to Sky City"),
+    ("RETCRD", "Return to Crystalline Dimension"),
+    ("DDTBR2", "Boss Rush II"),
 ]
+# Redux / legacy save tags that also satisfy a primary Chromatic map entry
+CHROMATIC_ALT_TAGS: dict[str, tuple[str, ...]] = {
+    "LHOLOC": ("SPECCA",),  # Redux records Spooktacular Bay under legacy Ogre Crush tag
+    "DDTBR2": ("SPECGC",),
+}
 
 _RUTHLESS_HC_BIT = 1 << 11
 _NM_HC_BIT = 1 << 10
@@ -425,9 +450,9 @@ CHIKU_SECTIONS: list[tuple[str, str, str]] = [
     ("ddt_manual", "DDT Manual Achievements",
      "Post-Eternal content — not stored in Steam save."),
     ("ruthless", "Ruthless Defender",
-     "Late game: original campaign + 12 challenges on Ruthless HC (~6k+ tower stats)."),
+     "Late game: original campaign + all 13 challenges on Ruthless HC (~6k+ tower stats)."),
     ("chromatic", "Chromatic Defender",
-     "After Ruthless: Spooktacular Bay → Scorched Arabia + Warping Core II → Boss Rush II on NM HC."),
+     "After Ruthless: all 30 Lost Quest / DDT maps on NM HC (Ruthless HC also counts)."),
     ("extras", "Seasonal & DLC Extras",
      "Not required for Ultimate/Eternal — holiday packs, Tinkerer's Lab, etc."),
 ]
@@ -563,7 +588,7 @@ ACH_TIPS: dict[str, str] = {
     "Real Time Strategist": "Same as Mythical RTS but any difficulty.",
     "I've Got Monsters in My Pocket": "All 31 pet types in item box — overlaps heavily with survival pet farming.",
     "Jingled All the Way": "Etherian Holiday Extravaganza — any difficulty; gas-trap spawns recommended.",
-    "Ruthless Defender": "Original campaign + 12 challenges on Ruthless HC — Chiku recommends deferring until ~6k tower stats.",
+    "Ruthless Defender": "Original campaign + all 13 challenges on Ruthless HC — Chiku recommends deferring until ~6k tower stats.",
     "Chromatic Defender": "Requires Ruthless Defender first, then DDT Lost Quest + challenge maps on NM HC.",
     "No Towers Allowed": "Natural hero-DPS map — stack with Brute Force mindset; run NM HC for Transcendent Challenge Champion.",
 }
@@ -1087,32 +1112,39 @@ def _map_done_on_bit(beaten_levels: dict[str, int], tag: str, bit: int) -> bool:
     return (beaten_levels.get(tag, 0) & bit) != 0
 
 
+def _chromatic_map_done(beaten_levels: dict[str, int], tag: str) -> bool:
+    """True if map cleared on NM HC or Ruthless HC (primary tag or known Redux alias)."""
+    tags = (tag,) + CHROMATIC_ALT_TAGS.get(tag, ())
+    for t in tags:
+        if _map_done_on_bit(beaten_levels, t, _NM_HC_BIT) or _map_done_on_bit(
+            beaten_levels, t, _RUTHLESS_HC_BIT
+        ):
+            return True
+    return False
+
+
 def check_ruthless_defender(beaten_levels: dict[str, int]) -> bool:
-    """Check if all 13 original campaign maps and challenges are completed on Ruthless Hardcore."""
+    """Check if all 13 original campaign maps and 13 challenges are completed on Ruthless Hardcore."""
     if not beaten_levels:
         return False
     campaign_ok = all(
         _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
         for tag, _ in RUTHLESS_CAMPAIGN_MAPS
     )
-    challenges_beaten = sum(
-        1 for tag, _ in RUTHLESS_CHALLENGE_MAPS
-        if _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
+    challenges_ok = all(
+        _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
+        for tag, _ in RUTHLESS_CHALLENGE_MAPS
     )
-    return campaign_ok and challenges_beaten >= 12
+    return campaign_ok and challenges_ok
 
 
 def check_chromatic_defender(beaten_levels: dict[str, int]) -> bool:
-    """Check if all DDT maps from Spooktacular Bay to Scorched Arabia and Warping Core II to Boss Rush II are completed on Nightmare Hardcore."""
+    """All Lost Quest + DDT challenge maps on NM HC after Ruthless Defender (wiki Chromatic Defender)."""
     if not beaten_levels:
         return False
     if not check_ruthless_defender(beaten_levels):
         return False
-    return all(
-        _map_done_on_bit(beaten_levels, tag, _NM_HC_BIT)
-        or _map_done_on_bit(beaten_levels, tag, _RUTHLESS_HC_BIT)
-        for tag, _ in CHROMATIC_MAPS
-    )
+    return all(_chromatic_map_done(beaten_levels, tag) for tag, _ in CHROMATIC_MAPS)
 
 
 def ruthless_map_status(beaten_levels: dict[str, int]) -> list[tuple[str, bool]]:
@@ -1131,9 +1163,7 @@ def chromatic_map_status(beaten_levels: dict[str, int]) -> list[tuple[str, bool]
         ("Prerequisite: Ruthless Defender", check_ruthless_defender(beaten_levels)),
     ]
     for tag, name in CHROMATIC_MAPS:
-        mask = beaten_levels.get(tag, 0)
-        done = (mask & _NM_HC_BIT) != 0 or (mask & _RUTHLESS_HC_BIT) != 0
-        maps.append((f"{name} (NM HC)", done))
+        maps.append((f"{name} (NM HC)", _chromatic_map_done(beaten_levels, tag)))
     return maps
 
 
@@ -1734,15 +1764,7 @@ class AchievementTrackerWidget(QWidget):
                 maps = ruthless_map_status(self._beaten_levels)
                 missing = [name for name, done in maps if not done]
                 done = sum(1 for _, d in maps if d)
-                challenges_done = sum(
-                    1 for tag, _ in RUTHLESS_CHALLENGE_MAPS
-                    if _map_done_on_bit(self._beaten_levels, tag, _RUTHLESS_HC_BIT)
-                )
-                campaign_done = sum(
-                    1 for tag, _ in RUTHLESS_CAMPAIGN_MAPS
-                    if _map_done_on_bit(self._beaten_levels, tag, _RUTHLESS_HC_BIT)
-                )
-                is_done = (campaign_done == len(RUTHLESS_CAMPAIGN_MAPS)) and (challenges_done >= 12)
+                is_done = check_ruthless_defender(self._beaten_levels)
                 if is_done:
                     missing = []
                 card.set_progress(done, is_done, missing)

@@ -62,14 +62,98 @@ Use **Reload** after playing to refresh unlocks and map completion data.
 
 ## Ruthless & Chromatic Defender (save-verified)
 
-These two endgame metas are **not** Steam bitmap achievements. The tracker verifies them from **beaten level flags** in your `.dun` file:
+These two endgame metas are **not** Steam bitmap achievements. The tracker verifies them from **beaten level flags** in your `.dun` file (difficulty bitmask bits 10 = Nightmare HC, 11 = Ruthless HC).
 
-| Achievement | Requirement |
+In **Chiku Guide** or **Meta Path** sort, each section includes a prominent **EXPAND** button listing every required map with done/missing status. The list follows your **Filter** (All / Completed / Missing).
+
+### Ruthless Defender
+
+| | |
 |---|---|
-| **Ruthless Defender** | All 13 original campaign maps **and** 12 of 13 original challenges on **Ruthless Hardcore** |
-| **Chromatic Defender** | Ruthless Defender complete, then Spooktacular Bay → Scorched Arabia **and** Warping Core II → Boss Rush II on **Nightmare Hardcore** (Ruthless HC also counts) |
+| **Difficulty** | Ruthless |
+| **Mode** | Hardcore (required on every map) |
+| **Total** | 26 clears — 13 campaign maps + 13 challenges |
 
-In **Chiku Guide** or **Meta Path** sort, each section includes a prominent **EXPAND** button listing every map with done/missing status. The list follows your **Filter** (All / Completed / Missing).
+**Campaign (13)**
+
+1. The Deeper Well  
+2. Foundries and Forges  
+3. Magus Quarters  
+4. Alchemical Laboratory  
+5. Servants Quarters  
+6. Castle Armory  
+7. Hall of Court  
+8. The Throne Room  
+9. Royal Gardens  
+10. The Ramparts  
+11. Endless Spires  
+12. The Summit  
+13. Glitterhelm Caverns  
+
+**Challenges (13)**
+
+1. No Towers Allowed  
+2. Unlikely Allies  
+3. Warping Core  
+4. Raining Goblins  
+5. Wizardry  
+6. Ogre Crush  
+7. Zippy Terror  
+8. Chicken  
+9. Moving Core  
+10. Death From Above  
+11. Assault  
+12. Treasure Hunt  
+13. Monster Fest  
+
+All 26 must be cleared on **Ruthless Hardcore**. The tracker uses vanilla save tags from `DefaultDunDef.ini` (e.g. `SPECMQ` = Warping Core, `SPECES`/`SPECTS` = Assault/Treasure Hunt).
+
+### Chromatic Defender
+
+| | |
+|---|---|
+| **Difficulty** | Nightmare (Ruthless HC also counts) |
+| **Mode** | Hardcore (required on every map) |
+| **Prerequisite** | Ruthless Defender complete |
+| **Total** | 30 clears — Lost Quests tab + DDT challenge tab |
+
+**Required maps & challenges (30)**
+
+1. Spooktacular Bay  
+2. Challenge: Halloween Invasion  
+3. The Striking Tree  
+4. Challenge: Tavern Incursion  
+5. Lover's Paradise  
+6. Crystal Escort: Wandering Heart  
+7. Lifestream Hollow  
+8. Challenge: Forest Ogre Crush  
+9. Tropics of Etheria  
+10. Crystal Cave  
+11. No Towers Allowed: Crystal Cave  
+12. Challenge: Eternia Gauntlet  
+13. Frostdale Wonderland  
+14. Challenge: The Love Machine  
+15. Tinkerer's Workshop  
+16. Challenge: Workshop Assault  
+17. Sky Spooktacular  
+18. Frostdale Royal Court  
+19. Challenge: Scorched Arabia  
+20. Warping Core Challenge Pack 2: Part 1  
+21. Warping Core Challenge Pack 2: Part 2  
+22. Warping Core Challenge Pack 2: Part 3  
+23. Jester's Spooktacular  
+24. Valentine Citadel  
+25. Return to Mistymire  
+26. Return to Moraggo  
+27. Return to Aquanos  
+28. Return to Sky City  
+29. Return to Crystalline Dimension  
+30. Boss Rush II  
+
+**Notes**
+
+- DLC ownership is not checked — only whether the save records a NM/Ruthless HC clear for each map tag.
+- Some Redux/legacy saves use alternate tags; the tracker also accepts `SPECCA` for Spooktacular Bay and `SPECGC` for Boss Rush II when the primary tag is unset.
 
 ---
 
@@ -95,11 +179,11 @@ Top meta cards show prerequisite progress and missing items in tooltips. Click a
 
 ---
 
-## Local config (not committed)
+## Local config (gitignored)
 
-The app creates `_ach_manual.json` beside the script for **UI settings only** (last `.dun` path, `.ini` path, sort mode). This file can contain **absolute paths to your PC** — it is listed in `.gitignore` and must not be pushed to git.
+The app creates `_ach_manual.json` beside the script for **UI settings only** (last `.dun` path, `.ini` path, sort mode). This file can contain **absolute paths to your PC** — it is listed in `.gitignore` and is never pushed to the repo.
 
-**Never commit:** `.dun` saves, `_ach_manual.json`, or other machine-local paths.
+**Do not commit:** `.dun` save files, `_ach_manual.json`, or debug dumps derived from your save.
 
 ---
 
@@ -107,8 +191,9 @@ The app creates `_ach_manual.json` beside the script for **UI settings only** (l
 
 | File | Purpose |
 |---|---|
-| `achievement_tracker.pyw` | **Double-click to launch** (no console) |
+| `achievement_tracker.pyw` | **Double-click to launch** on Windows (no console) |
 | `achievement_tracker.py` | Main GUI application |
 | `dun_parser.py` | Save-file decompressor, achievement bytes, beaten-level parser |
 | `dump_ach_bytes.py` | Debug helper for inspecting raw achievement bytes |
+| `.gitignore` | Excludes saves, local UI config, and debug dumps |
 | `_ach_manual.json` | Auto-created local UI settings (**gitignored**) |
