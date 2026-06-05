@@ -2,6 +2,8 @@
 
 A desktop GUI for tracking all **163 Dungeon Defenders 1 achievements** — **118 Steam achievements** read from your save file, plus **45 non-Steam (CDT/DDT) entries** that are not stored in the `.dun` bitmap.
 
+**Try it in your browser (no install):** [dd1-achievement-tracker.pages.dev](https://dd1-achievement-tracker.pages.dev/) — drop your `DunDefHeroes.dun` save file; parsing happens locally in your tab and is never uploaded.
+
 ---
 
 ## Features
@@ -34,6 +36,12 @@ This repo is **self-contained** — clone it, install PySide6, point at a `.dun`
 ---
 
 ## Quick start
+
+### Browser (no Python)
+
+Open **[dd1-achievement-tracker.pages.dev](https://dd1-achievement-tracker.pages.dev/)**, then drop or browse to your `DunDefHeroes.dun` file. Same achievement list, meta cards, and Ruthless/Chromatic map tracking as the desktop app.
+
+### Desktop
 
 ```bash
 git clone https://github.com/MrVokerr/DD1-Achievement-Tracker.git
