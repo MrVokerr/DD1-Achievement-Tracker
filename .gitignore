@@ -1,0 +1,60 @@
+# =============================================================================
+# Machine-local / sensitive (never commit)
+# =============================================================================
+
+# Launcher (use achievement_tracker.py from source)
+*.pyw
+
+# This file
+.gitignore
+
+# UI settings: sort mode + absolute dun_path / ini_path on your machine
+_ach_manual.json
+
+# Save files (hero names, items, achievements, install paths)
+*.dun
+*.dun.bak
+DunDefHeroes.dun*
+
+# Debug dumps that may embed save-derived data
+ach_bytes*.txt
+ach_bytes*.json
+dump_*.json
+
+# =============================================================================
+# Web app (separate project — not part of this repo)
+# =============================================================================
+web/
+
+scripts/export_web_data.py
+scripts/parity_test.py
+scripts/parity_fixture_test.py
+
+# One-off maintainer / local tools (not needed for Pages build)
+extract_steam_index.py
+
+# =============================================================================
+# Python
+# =============================================================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.venv/
+venv/
+
+# =============================================================================
+# Node (if created outside web/)
+# =============================================================================
+node_modules/
+dist/
+.vite/
+
+# =============================================================================
+# OS / IDE noise
+# =============================================================================
+.DS_Store
+Thumbs.db
+desktop.ini
+.idea/
+.vscode/
