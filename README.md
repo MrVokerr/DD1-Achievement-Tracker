@@ -33,13 +33,13 @@ pip install PySide6
 
 ## Usage
 
-**Double-click** `achievement_tracker.pyw` on Windows — opens the GUI with no console window.
-
-Or from a terminal:
+From a terminal in this folder:
 
 ```
 python achievement_tracker.py
 ```
+
+On Windows you can also create a local `achievement_tracker.pyw` launcher (not included in the repo) that calls `achievement_tracker.main()` with `pythonw` for a console-free window.
 
 On first launch, click **Browse…** and select your save file:
 
@@ -192,11 +192,11 @@ Top meta cards show prerequisite progress and missing items in tooltips. Click a
 
 ---
 
-## Local config (gitignored)
+## Local config (keep private)
 
-The app creates `_ach_manual.json` beside the script for **UI settings only** (last `.dun` path, `.ini` path, sort mode). This file can contain **absolute paths to your PC** — it is listed in `.gitignore` and is never pushed to the repo.
+The app creates `_ach_manual.json` beside the script for **UI settings only** (last `.dun` path, `.ini` path, sort mode). This file can contain **absolute paths to your PC**.
 
-**Do not commit:** `.dun` save files, `_ach_manual.json`, or debug dumps derived from your save.
+**Do not commit or share:** `.dun` save files, `_ach_manual.json`, `achievement_tracker.pyw`, or debug dumps derived from your save.
 
 ---
 
@@ -204,9 +204,7 @@ The app creates `_ach_manual.json` beside the script for **UI settings only** (l
 
 | File | Purpose |
 |---|---|
-| `achievement_tracker.pyw` | **Double-click to launch** on Windows (no console) |
-| `achievement_tracker.py` | Main GUI application |
+| `achievement_tracker.py` | Main GUI application — run with `python achievement_tracker.py` |
 | `dun_parser.py` | Save-file decompressor, achievement bytes, beaten-level parser |
 | `dump_ach_bytes.py` | Debug helper for inspecting raw achievement bytes |
-| `.gitignore` | Excludes saves, local UI config, and debug dumps |
-| `_ach_manual.json` | Auto-created local UI settings (**gitignored**) |
+| `_ach_manual.json` | Auto-created local UI settings (created on first run; keep private) |
