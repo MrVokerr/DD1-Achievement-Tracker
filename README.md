@@ -9,8 +9,9 @@ A desktop GUI for tracking all **163 Dungeon Defenders 1 achievements** — **11
 - **Browse any `.dun` file** — point at your save (or someone else's) with **Browse…**; path is remembered locally
 - **Steam achievements** — unlocked flags parsed from `DunDefHeroes.dun` + `UDKEngineSteamworks.ini`
 - **Save-verified meta tracking** — **Ruthless Defender** and **Chromatic Defender** progress computed from beaten-level data in your save (no manual checkboxes)
-- **5 clickable meta cards** at the top (Legendary → Ultimate → Eternal → Ruthless → Chromatic) with colored progress bars — **click a card to jump** to that section in **Meta Path** sort
+- **5 clickable meta cards** at the top (Legendary → Ultimate → Eternal → Ruthless → Chromatic) with colored progress bars — **click a card to jump** to that section in **Meta Path** sort (scrolls so the section header is pinned to the top of the list)
 - **Expandable map lists** for Ruthless and Chromatic sections — large expand buttons show every required map as done/missing (respects the active filter)
+- **Dual progress headers** for Ruthless and Chromatic — section titles show both meta trophy status and map checklist progress, e.g. `RUTHLESS DEFENDER — 0/1 done (5/26 maps done)`
 - **Sort modes** — **Chiku Guide** (recommended hunt order), **Meta Path** (Legendary → Chromatic ladder), or **Default** (by category)
 - **Filter:** **All / Completed / Missing** plus real-time search
 - **Color-coded accent bars** on each row show which meta path an achievement contributes to
@@ -65,6 +66,18 @@ Use **Reload** after playing to refresh unlocks and map completion data.
 These two endgame metas are **not** Steam bitmap achievements. The tracker verifies them from **beaten level flags** in your `.dun` file (difficulty bitmask bits 10 = Nightmare HC, 11 = Ruthless HC).
 
 In **Chiku Guide** or **Meta Path** sort, each section includes a prominent **EXPAND** button listing every required map with done/missing status. The list follows your **Filter** (All / Completed / Missing).
+
+**Section headers** for these two metas use a combined format:
+
+| Section | Header example |
+|---|---|
+| Ruthless Defender | `RUTHLESS DEFENDER — 0/1 done (5/26 maps done)` |
+| Chromatic Defender | `CHROMATIC DEFENDER — 0/1 done (4/30 maps done)` |
+
+- **0/1 done** — whether the save-verified meta achievement is complete.
+- **(X/Y maps done)** — how many individual campaign/challenge maps are cleared at the required difficulty (26 Ruthless, 30 Chromatic).
+
+Click any top meta card to jump; the matching section header scrolls to the **top** of the achievement list.
 
 ### Ruthless Defender
 

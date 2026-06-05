@@ -39,7 +39,7 @@ try:
         QLabel, QPushButton, QLineEdit, QScrollArea, QFrame,
         QFileDialog, QSizePolicy, QProgressBar, QButtonGroup,
     )
-    from PySide6.QtCore import Qt, QTimer, QUrl
+    from PySide6.QtCore import Qt, QTimer, QUrl, QPoint
     from PySide6.QtGui import QFont, QColor, QDesktopServices
 except ImportError:
     try:
@@ -1671,9 +1671,16 @@ class AchievementTrackerWidget(QWidget):
         self._rebuild_list()
 
     def _scroll_to_section(self, section_key: str) -> None:
+        """Pin the section header to the top of the scroll viewport (not the section bottom)."""
         widget = self._section_anchors.get(section_key)
-        if widget:
-            self._scroll.ensureWidgetVisible(widget, 80, 80)
+        content = self._scroll.widget()
+        if not widget or content is None:
+            return
+        content.updateGeometry()
+        top_margin = 8
+        y = widget.mapTo(content, QPoint(0, 0)).y()
+        bar = self._scroll.verticalScrollBar()
+        bar.setValue(max(0, min(y - top_margin, bar.maximum())))
 
     def _load(self):
         if not self._dun_path or not os.path.isfile(self._dun_path):
@@ -1825,11 +1832,31 @@ class AchievementTrackerWidget(QWidget):
             return _chiku_section_key(name)
         return _meta_group_key(name)
 
+    def _save_verified_section_suffix(self, section_key: str) -> str | None:
+        """Ruthless/Chromatic headers show meta trophy progress plus map checklist progress."""
+        if section_key == "ruthless":
+            ach_done = 1 if check_ruthless_defender(self._beaten_levels) else 0
+            maps_done = sum(1 for _, done in ruthless_map_status(self._beaten_levels) if done)
+            map_total = len(RUTHLESS_CAMPAIGN_MAPS) + len(RUTHLESS_CHALLENGE_MAPS)
+            return f" — {ach_done}/1 done ({maps_done}/{map_total} maps done)"
+        if section_key == "chromatic":
+            ach_done = 1 if check_chromatic_defender(self._beaten_levels) else 0
+            maps_done = sum(
+                1 for tag, _ in CHROMATIC_MAPS
+                if _chromatic_map_done(self._beaten_levels, tag)
+            )
+            map_total = len(CHROMATIC_MAPS)
+            return f" — {ach_done}/1 done ({maps_done}/{map_total} maps done)"
+        return None
+
     def _header_for_section(self, section_key: str) -> tuple[str, str, str]:
         if self._sort_mode == "default":
             return (section_key.upper(), "", "")
         if self._sort_mode == "chiku":
             title, blurb = _CHIKU_SECTION_LOOKUP.get(section_key, ("Other", ""))
+            save_suffix = self._save_verified_section_suffix(section_key)
+            if save_suffix is not None:
+                return (title, blurb, save_suffix)
             members = CHIKU_SECTION_MEMBERS.get(section_key, [])
             if members:
                 done = sum(
@@ -1849,6 +1876,9 @@ class AchievementTrackerWidget(QWidget):
             "chromatic": "DDT endgame — after Ruthless Defender (save file verified).",
             "other": "Seasonal/DLC extras not required for core meta path.",
         }.get(section_key, "")
+        save_suffix = self._save_verified_section_suffix(section_key)
+        if save_suffix is not None:
+            return (title, blurb, save_suffix)
         group_members = next((g[2] for g in META_SORT_GROUPS if g[0] == section_key), set())
         if group_members:
             done = sum(
@@ -1995,7 +2025,8 @@ class AchievementTrackerWidget(QWidget):
         if self._pending_scroll_key:
             scroll_key = self._pending_scroll_key
             self._pending_scroll_key = None
-            QTimer.singleShot(50, lambda k=scroll_key: self._scroll_to_section(k))
+            QTimer.singleShot(0, lambda k=scroll_key: self._scroll_to_section(k))
+            QTimer.singleShot(80, lambda k=scroll_key: self._scroll_to_section(k))
 
 
 class AchievementTracker(QMainWindow):
