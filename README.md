@@ -28,7 +28,9 @@ Static site in `web/` — deploy to **Cloudflare Pages** (free tier friendly: on
 
 **Privacy:** Your `.dun` is read with `FileReader` in the tab only; it is **not** sent to Cloudflare or any backend.
 
-**Live URL:** Set your custom domain in Cloudflare Pages after connecting this repo (e.g. `achievements.yourdomain.com`).
+**Live URL:** [https://dd1-achievement-tracker.pages.dev](https://dd1-achievement-tracker.pages.dev)
+
+Redeploy after changes: `python scripts/export_web_data.py && cd web && npm run build && npx wrangler pages deploy dist --project-name=dd1-achievement-tracker`
 
 Local dev:
 
